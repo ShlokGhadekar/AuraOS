@@ -1,0 +1,18 @@
+# AuraOS · Project Registry
+# Edit this file to add/remove projects.
+# id must be unique and slug-friendly (lowercase, hyphens only)
+
+projects:
+  - id: auraos
+    name: AuraOS
+    path: ~/Documents/auraos
+    description: AI-powered personal computing environment. Python, FastAPI, MCP.
+    github_repo: ""
+    tags: [python, ai, fastapi]
+
+  - id: fake-news-detection
+    name: Fake News Detection
+    path: ~/Documents/fake-news-detection
+    description: ML classifier for misinformation detection using NLP and BERT.
+    github_repo: ""
+    tags: [python, ml, nlp]
