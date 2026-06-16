@@ -16,3 +16,16 @@ projects:
     description: ML classifier for misinformation detection using NLP and BERT.
     github_repo: ""
     tags: [python, ml, nlp]
+
+    python -c "
+from memory.semantic import SemanticMemory
+from config.settings import settings
+import yaml
+
+sem = SemanticMemory(settings.chroma_path)
+with open(settings.projects_yaml) as f:
+    projects = yaml.safe_load(f)['projects']
+for p in projects:
+    sem.upsert_project(p['id'], f\"{p['id']}: {p['description']}\", metadata={'path': p['path']})
+print('Seeded', len(projects), 'projects')
+"
