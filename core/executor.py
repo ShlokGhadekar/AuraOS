@@ -22,10 +22,11 @@ from memory.episodic import EpisodicMemory
 from memory.working import WorkingMemory
 from tools.macos_tools import MACOS_TOOLS_BY_NAME
 from tools.filesystem_tools import FILESYSTEM_TOOLS_BY_NAME
+from tools.git_tools import GIT_TOOLS_BY_NAME
 from config.settings import settings
 
 # All tools the executor knows about
-ALL_TOOLS = {**MACOS_TOOLS_BY_NAME, **FILESYSTEM_TOOLS_BY_NAME}
+ALL_TOOLS = {**MACOS_TOOLS_BY_NAME, **FILESYSTEM_TOOLS_BY_NAME, **GIT_TOOLS_BY_NAME}
 
 MCP_TO_LOCAL = {
     "launch_app":            "open_app",
@@ -35,6 +36,11 @@ MCP_TO_LOCAL = {
     "detect_project":        "detect_project",
     "list_recent_files":     "list_recent_files",
     "list_projects":         "list_projects",
+    "quit_apps":             "quit_apps",
+    "set_do_not_disturb":    "set_do_not_disturb",
+    "git_status":            "git_status",
+    "git_commit":            "git_commit",
+    "git_init_and_push":     "git_init_and_push",
 }
 
 TOOL_DISPLAY = {

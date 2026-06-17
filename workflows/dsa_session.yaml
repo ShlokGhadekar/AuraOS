@@ -1,0 +1,43 @@
+name: DSA Study Session
+id: dsa_session
+description: Set up a focused DSA/LeetCode study session
+triggers:
+  - "start dsa session"
+  - "dsa session"
+  - "leetcode session"
+  - "study algorithms"
+
+variables:
+  - name: duration_minutes
+    default: 60
+    prompt: "How long? (minutes)"
+
+steps:
+  - name: Open LeetCode
+    tool: browser_open_url
+    params:
+      url: "https://leetcode.com/problemset/"
+
+  - name: Open VS Code
+    tool: open_vscode_workspace
+    params:
+      path: "~/Documents/dsa-practice"
+      files: ["notes.md"]
+
+  - name: Open notes
+    tool: open_file_with_app
+    params:
+      path: "~/Documents/dsa-notes.md"
+      app_name: "Visual Studio Code"
+
+  - name: Start timer notification
+    tool: send_notification
+    params:
+      title: "DSA Session Started"
+      message: "Focus time: {duration_minutes} minutes. Good luck!"
+
+  - name: Log session start
+    tool: log_workflow_run
+    params:
+      workflow_id: dsa_session
+      notes: "Started {duration_minutes} min DSA session"

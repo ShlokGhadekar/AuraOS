@@ -349,3 +349,84 @@ MACOS_TOOLS: list[AuraTool] = [
 ]
 
 MACOS_TOOLS_BY_NAME: dict[str, AuraTool] = {t.name: t for t in MACOS_TOOLS}
+
+class QuitApps(AuraTool):
+    name = "quit_apps"
+    description = "Quit one or more macOS applications by name."
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "apps": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "List of app names to quit",
+            }
+        },
+        "required": ["apps"],
+    }
+    is_reversible = False
+    category = "macos"
+
+    def execute(self, apps: list[str]) -> ToolResult:
+        quit_results = []
+        for app in apps:
+            script = f'tell application "{app}" to quit'
+            code, _, err = _osascript(script)
+            quit_results.append({"app": app, "success": code == 0})
+        succeeded = [r["app"] for r in quit_results if r["success"]]
+        return self.ok(
+            message=f"Quit {len(succeeded)} apps: {', '.join(succeeded)}",
+            output={"results": quit_results},
+        )
+
+
+class SetDoNotDisturb(AuraTool):
+    name = "set_do_not_disturb"
+    description = "Enable or disable macOS Do Not Disturb / Focus mode."
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "enabled": {
+                "type": "boolean",
+                "description": "True to enable DND, False to disable",
+            }
+        },
+        "required": ["enabled"],
+    }
+    is_reversible = True
+    category = "macos"
+
+    def execute(self, enabled: bool) -> ToolResult:
+        # macOS Sonoma/Sequoia: toggle Focus via shortcuts
+        action = "on" if enabled else "off"
+        # Use osascript to toggle via System Events
+        script = f"""
+        tell application "System Events"
+            tell process "Control Center"
+                -- Focus mode toggle via menu bar
+            end tell
+        end tell
+        """
+        # Fallback: use shortcuts app if available
+        code, _, err = _run([
+            "shortcuts", "run",
+            "Enable Do Not Disturb" if enabled else "Disable Do Not Disturb"
+        ])
+        if code == 0:
+            return self.ok(message=f"Do Not Disturb {'enabled' if enabled else 'disabled'}")
+        # Non-fatal — DND is nice to have
+        return self.ok(
+            message=f"DND toggle attempted (manual toggle may be needed)",
+            metadata={"manual_required": True},
+        )
+    
+MACOS_TOOLS: list[AuraTool] = [
+OpenApp(),
+OpenFile(),
+OpenVSCodeWorkspace(),
+SendNotification(),
+QuitApps(),
+SetDoNotDisturb(),
+]
+
+MACOS_TOOLS_BY_NAME: dict[str, AuraTool] = {t.name: t for t in MACOS_TOOLS}

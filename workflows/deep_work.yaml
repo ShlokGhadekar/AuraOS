@@ -1,0 +1,35 @@
+name: Deep Work Mode
+id: deep_work
+description: Enter a focused deep work session — close distractions, open project
+triggers:
+  - "deep work"
+  - "focus mode"
+  - "start focus session"
+  - "no distractions"
+
+variables:
+  - name: project_id
+    default: null
+    prompt: "Which project?"
+
+steps:
+  - name: Open project in VS Code
+    tool: open_vscode_workspace
+    params:
+      path: "{project_path}"
+
+  - name: Quit distracting apps
+    tool: quit_apps
+    params:
+      apps: ["Slack", "Discord", "Mail", "Messages"]
+
+  - name: Enable Do Not Disturb
+    tool: set_do_not_disturb
+    params:
+      enabled: true
+
+  - name: Notify
+    tool: send_notification
+    params:
+      title: "Deep Work Mode"
+      message: "Distractions closed. Time to build."

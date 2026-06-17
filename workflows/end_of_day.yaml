@@ -1,0 +1,36 @@
+name: End of Day Wrap
+id: end_of_day
+description: Commit work, write session summary, plan tomorrow
+triggers:
+  - "end of day"
+  - "wrap up"
+  - "done for today"
+  - "end my session"
+
+steps:
+  - name: Git status check
+    tool: git_status
+    params:
+      path: "{active_project_path}"
+
+  - name: Git add and commit
+    tool: git_commit
+    params:
+      path: "{active_project_path}"
+      message: "{auto_commit_message}"
+    requires_confirmation: true
+
+  - name: Save session snapshot
+    tool: save_context_snapshot
+    params:
+      project_id: "{active_project_id}"
+
+  - name: Generate tomorrow plan
+    tool: synthesize_daily_plan
+    params: {}
+
+  - name: Notify
+    tool: send_notification
+    params:
+      title: "Day wrapped"
+      message: "Committed, saved context. See you tomorrow."

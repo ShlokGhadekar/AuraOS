@@ -14,6 +14,8 @@ INTENTS = {
     "dsa_session":       "User wants to start a DSA / LeetCode study session",
     "open_app":          "User wants to open a specific application",
     "open_file":         "User wants to open a specific file",
+    "run_workflow":      "User wants to run a named workflow like DSA session, deep work, end of day",
+    "project_kickoff":  "User wants to create a brand new project from scratch",
     "github_query":      "User is asking about GitHub repos, issues, or PRs",
     "calendar_query":    "User is asking about their schedule or deadlines",
     "memory_query":      "User is asking about past sessions or what they worked on",

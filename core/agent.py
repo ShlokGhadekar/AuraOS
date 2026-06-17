@@ -38,6 +38,58 @@ class Agent:
         wm.intent = intent.get("intent")
         yield f"   Intent: {intent.get('intent')} ({intent.get('confidence', 0):.0%})\n"
 
+        # Check if this matches a workflow before planning
+        from core.workflow_engine import match_workflow, build_workflow_context, WorkflowExecutor
+
+        workflow = match_workflow(user_input)
+        if workflow or intent.get("intent") in ("run_workflow", "dsa_session", "project_kickoff"):
+            if not workflow:
+                # Try matching by intent name
+                from core.workflow_engine import load_workflow
+                intent_to_workflow = {
+                    "dsa_session":     "dsa_session",
+                    "project_kickoff": "project_kickoff",
+                    "run_workflow":    None,
+                }
+                wf_id = intent_to_workflow.get(intent.get("intent"))
+                if wf_id:
+                    try:
+                        workflow = load_workflow(wf_id)
+                    except FileNotFoundError:
+                        workflow = None
+
+        if workflow:
+            yield f"   Workflow: {workflow['name']}\n"
+
+            # Build session
+            session = self.mem.start_session(
+                raw_input=user_input,
+                project_id=wm.active_project_id,
+                intent=intent.get("intent"),
+            )
+            wm.session_id = session.id
+
+            # Build context
+            agent_ctx = {
+                "active_project_id":   wm.active_project_id or "",
+                "active_project_path": "",
+            }
+            if wm.active_project_id:
+                project = self.mem.get_project(wm.active_project_id)
+                if project:
+                    agent_ctx["active_project_path"] = project.path
+
+            wf_context = build_workflow_context(workflow, user_input, agent_ctx)
+
+            # Execute workflow
+            from core.executor import Executor
+            executor = Executor(session.id, wm, self.mem)
+            wf_executor = WorkflowExecutor(workflow, wf_context, executor)
+            yield from wf_executor.run()
+
+            self.mem.end_session(session.id, status="completed")
+            return   # Skip normal plan/execute flow    
+
         # ── Stage 2: Load context ──────────────────────────────
         context = {}
         project_hint = intent.get("project_hint")
