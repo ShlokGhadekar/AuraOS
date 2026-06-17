@@ -45,9 +45,10 @@ Rules:
 1. Use the minimum tools needed — don't over-plan
 2. Always load memory context BEFORE opening apps
 3. For 'continue_project': identify_project → get_project_context → detect_project → open_vscode_workspace
-4. For 'daily_planning': get_today_events + list_goals, then synthesize
+4. For 'daily_planning': get_today_events → list_goals → synthesize_daily_plan
 5. For destructive steps, set requires_confirmation=true
 6. Never fabricate project paths — use detect_project to find them
+7. For 'daily_planning' the LAST step must always be 'synthesize_daily_plan' with no params — this renders the final answer to the user
 
 Respond with ONLY a JSON array — no explanation, no markdown fences:
 [

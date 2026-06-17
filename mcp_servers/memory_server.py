@@ -1,151 +1,115 @@
 """
 AuraOS · Memory MCP Server
 Port: 8103
-
-Exposes the three-tier memory system to the agent.
-The agent reads and writes context through this server —
-it never touches SQLite or ChromaDB directly.
 """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import json
+import uvicorn
+from fastapi import FastAPI
+from pydantic import BaseModel
+from typing import Any
 from dataclasses import asdict
-from mcp.server.fastmcp import FastMCP
 
 from memory.episodic import EpisodicMemory
 from memory.semantic import SemanticMemory
 from config.settings import settings
 
-mcp = FastMCP("aura-memory", port=settings.port_memory)
+app = FastAPI(title="AuraOS Memory Server")
 mem = EpisodicMemory(settings.db_path)
 sem = SemanticMemory(settings.chroma_path)
 
 
-@mcp.tool()
-def get_project_context(project_id: str) -> str:
-    """
-    Get full context for a project: snapshot, recent sessions, goals.
-    This is the primary tool for restoring context at session start.
-    Call this whenever the user says 'continue my <project>'.
-    """
-    ctx = mem.get_project_context(project_id)
-    return json.dumps({"success": True, "output": ctx})
+class ToolRequest(BaseModel):
+    params: dict[str, Any] = {}
 
 
-@mcp.tool()
-def get_current_snapshot(project_id: str) -> str:
-    """
-    Get the most recent context snapshot for a project.
-    Returns: current_goal, last_action, next_step, open_questions, blockers.
-    """
-    snap = mem.get_current_snapshot(project_id)
+@app.get("/health")
+def health():
+    return {"status": "ok", "server": "memory"}
+
+
+@app.post("/tools/get_project_context")
+def get_project_context(req: ToolRequest):
+    ctx = mem.get_project_context(req.params.get("project_id"))
+    return {"success": True, "output": ctx}
+
+
+@app.post("/tools/get_current_snapshot")
+def get_current_snapshot(req: ToolRequest):
+    snap = mem.get_current_snapshot(req.params.get("project_id"))
     if not snap:
-        return json.dumps({"success": False, "error": f"No snapshot found for '{project_id}'"})
-    return json.dumps({"success": True, "output": asdict(snap)})
+        return {"success": False, "error": "No snapshot found"}
+    return {"success": True, "output": asdict(snap)}
 
 
-@mcp.tool()
-def save_context_snapshot(
-    project_id: str,
-    current_goal: str = None,
-    last_action: str = None,
-    next_step: str = None,
-    open_questions: list = None,
-    relevant_files: list = None,
-    blockers: list = None,
-    summary: str = None,
-    session_id: str = None,
-) -> str:
-    """
-    Save a context snapshot for a project. Call this at session end
-    via the summarizer. Retires the previous current snapshot.
-    """
+@app.post("/tools/save_context_snapshot")
+def save_context_snapshot(req: ToolRequest):
+    p = req.params
     snap = mem.save_snapshot(
-        project_id=project_id,
-        session_id=session_id,
-        current_goal=current_goal,
-        last_action=last_action,
-        next_step=next_step,
-        open_questions=open_questions or [],
-        relevant_files=relevant_files or [],
-        blockers=blockers or [],
-        summary=summary,
+        project_id=p.get("project_id"),
+        session_id=p.get("session_id"),
+        current_goal=p.get("current_goal"),
+        last_action=p.get("last_action"),
+        next_step=p.get("next_step"),
+        open_questions=p.get("open_questions", []),
+        relevant_files=p.get("relevant_files", []),
+        blockers=p.get("blockers", []),
+        summary=p.get("summary"),
     )
-    # Also index in semantic memory for fuzzy recall
-    if summary:
+    if p.get("summary") and p.get("project_id"):
         sem.upsert_snapshot(
             snap.id,
-            f"{project_id}: {summary}",
-            metadata={"project_id": project_id, "snapshot_id": snap.id},
+            f"{p['project_id']}: {p['summary']}",
+            metadata={"project_id": p["project_id"]},
         )
-    return json.dumps({"success": True, "output": asdict(snap)})
+    return {"success": True, "output": asdict(snap)}
 
 
-@mcp.tool()
-def search_projects_semantic(query: str, n_results: int = 3) -> str:
-    """
-    Fuzzy search across all projects by natural language.
-    Use when the user refers to a project vaguely:
-    'that NLP thing', 'my ML project', 'the React app'.
-    """
-    results = sem.search_projects(query, n_results=n_results)
-    return json.dumps({"success": True, "output": results})
-
-
-@mcp.tool()
-def identify_project(user_input: str) -> str:
-    """
-    Given raw user input, return the best-matching project_id.
-    Returns null if no confident match found.
-    Use this before detect_project when the project name is ambiguous.
-    """
-    project_id = sem.identify_project(user_input)
-    return json.dumps({"success": True, "output": {"project_id": project_id}})
-
-
-@mcp.tool()
-def list_goals(project_id: str = None) -> str:
-    """
-    List active goals, optionally filtered by project.
-    Use when answering 'what should I work on today?'
-    """
-    goals = mem.list_goals(project_id=project_id)
-    return json.dumps({"success": True, "output": [asdict(g) for g in goals]})
-
-
-@mcp.tool()
-def add_goal(
-    title: str,
-    project_id: str = None,
-    description: str = None,
-    priority: int = 2,
-    due_date: str = None,
-) -> str:
-    """
-    Add a new goal. priority: 1=high, 2=medium, 3=low.
-    due_date: ISO-8601 date string e.g. '2025-07-01', or omit.
-    """
-    goal = mem.add_goal(
-        title=title,
-        project_id=project_id,
-        description=description,
-        priority=priority,
-        due_date=due_date,
+@app.post("/tools/search_projects_semantic")
+def search_projects_semantic(req: ToolRequest):
+    results = sem.search_projects(
+        req.params.get("query", ""),
+        n_results=req.params.get("n_results", 3),
     )
-    return json.dumps({"success": True, "output": asdict(goal)})
+    return {"success": True, "output": results}
 
 
-@mcp.tool()
-def get_recent_sessions(project_id: str = None, limit: int = 5) -> str:
-    """
-    Get recent AuraOS sessions, optionally filtered by project.
-    """
-    sessions = mem.get_recent_sessions(project_id=project_id, limit=limit)
-    return json.dumps({"success": True, "output": [asdict(s) for s in sessions]})
+@app.post("/tools/identify_project")
+def identify_project(req: ToolRequest):
+    project_id = sem.identify_project(req.params.get("user_input", ""))
+    return {"success": True, "output": {"project_id": project_id}}
+
+
+@app.post("/tools/list_goals")
+def list_goals(req: ToolRequest):
+    goals = mem.list_goals(project_id=req.params.get("project_id"))
+    return {"success": True, "output": [asdict(g) for g in goals]}
+
+
+@app.post("/tools/add_goal")
+def add_goal(req: ToolRequest):
+    p = req.params
+    goal = mem.add_goal(
+        title=p.get("title"),
+        project_id=p.get("project_id"),
+        description=p.get("description"),
+        priority=p.get("priority", 2),
+        due_date=p.get("due_date"),
+    )
+    return {"success": True, "output": asdict(goal)}
+
+
+@app.post("/tools/get_recent_sessions")
+def get_recent_sessions(req: ToolRequest):
+    sessions = mem.get_recent_sessions(
+        project_id=req.params.get("project_id"),
+        limit=req.params.get("limit", 5),
+    )
+    return {"success": True, "output": [asdict(s) for s in sessions]}
 
 
 if __name__ == "__main__":
     print(f"[memory-server] starting on port {settings.port_memory}")
-    mcp.run(transport="sse")
+    uvicorn.run(app, host="127.0.0.1", port=settings.port_memory, log_level="warning")

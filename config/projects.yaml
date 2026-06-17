@@ -1,31 +1,14 @@
-# AuraOS · Project Registry
-# Edit this file to add/remove projects.
-# id must be unique and slug-friendly (lowercase, hyphens only)
-
 projects:
   - id: auraos
     name: AuraOS
-    path: ~/Documents/auraos
+    path: ~/Documents/Projects and stuff/auraos
     description: AI-powered personal computing environment. Python, FastAPI, MCP.
-    github_repo: ""
+    github_repo: ShlokGhadekar/AuraOS
     tags: [python, ai, fastapi]
 
-  - id: fake-news-detection
+  - id: fake-news
     name: Fake News Detection
-    path: ~/Documents/fake-news-detection
+    path: ~/Documents/fake-news
     description: ML classifier for misinformation detection using NLP and BERT.
-    github_repo: ""
+    github_repo: ShlokGhadekar/Fake_news_detection
     tags: [python, ml, nlp]
-
-    python -c "
-from memory.semantic import SemanticMemory
-from config.settings import settings
-import yaml
-
-sem = SemanticMemory(settings.chroma_path)
-with open(settings.projects_yaml) as f:
-    projects = yaml.safe_load(f)['projects']
-for p in projects:
-    sem.upsert_project(p['id'], f\"{p['id']}: {p['description']}\", metadata={'path': p['path']})
-print('Seeded', len(projects), 'projects')
-"

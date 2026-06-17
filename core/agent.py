@@ -1,18 +1,15 @@
 """
 AuraOS · Agent
 ==============
-The main entry point. Wires together:
-  classify → plan → show plan → execute → summarize
-
-Usage:
-    agent = Agent()
-    for token in agent.run("continue my fake news project"):
-        print(token, end="", flush=True)
+Main entry point. Wires together:
+  classify → load context → plan → show plan → execute → summarize
 """
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-
+import ssl
+import certifi
+ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 from collections.abc import Generator
 
 from core.intent import classify_intent
@@ -20,31 +17,17 @@ from core.planner import build_plan, format_plan_for_display
 from core.executor import Executor
 from core.summarizer import summarize_session
 from memory.episodic import EpisodicMemory
+from memory.semantic import SemanticMemory
 from memory.working import WorkingMemory
 from config.settings import settings
 
 
 class Agent:
-    """
-    One Agent instance per AuraOS session.
-    Create a new one for each user invocation.
-    """
-
     def __init__(self):
         self.mem = EpisodicMemory(settings.db_path)
+        self.sem = SemanticMemory(settings.chroma_path)
 
     def run(self, user_input: str) -> Generator[str, None, None]:
-        """
-        Main agent loop. Yields streaming tokens.
-
-        Stages:
-          1. Classify intent (fast, Haiku)
-          2. Load relevant context from memory
-          3. Build plan (Sonnet)
-          4. Show plan to user
-          5. Execute plan (streaming)
-          6. Summarize session and save snapshot
-        """
         wm = WorkingMemory()
         wm.raw_input = user_input
         wm.push_message("user", user_input)
@@ -61,14 +44,10 @@ class Agent:
 
         if project_hint:
             yield f"   Project hint: {project_hint}\n"
-            # Try to match to a registered project
-            from memory.semantic import SemanticMemory
-            sem = SemanticMemory(settings.chroma_path)
-            
-            project_id = sem.identify_project(project_hint) or _slugify(project_hint)
+            project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
             wm.set_project(project_id)
 
-# Ensure project exists in SQLite so session FK doesn't fail
+            # Ensure project exists in SQLite
             if not self.mem.get_project(project_id):
                 self.mem.upsert_project(
                     id=project_id,
@@ -76,19 +55,32 @@ class Agent:
                     path=str(Path.home() / "Documents" / project_id),
                 )
 
+            # Load episodic memory context
             ctx = self.mem.get_project_context(project_id)
             if ctx.get("snapshot"):
                 wm.set_snapshot(ctx["snapshot"])
                 snap = ctx["snapshot"]
-                yield f"   Memory: {snap.get('summary') or snap.get('current_goal') or 'snapshot loaded'}\n"
+                summary = snap.get("summary") or snap.get("current_goal") or "snapshot loaded"
+                yield f"   Memory: {summary}\n"
             context = ctx
+
+            # Load GitHub context if repo is registered
+            project = self.mem.get_project(project_id)
+            if project and project.github_repo:
+                yield f"   GitHub: fetching context for {project.github_repo}...\n"
+                gh_context = self._load_github_context(project.github_repo)
+                if gh_context:
+                    context["github"] = gh_context
+                    issues_count = len(gh_context.get("open_issues", []))
+                    commits_count = len(gh_context.get("recent_commits", []))
+                    yield f"   GitHub: {issues_count} open issues · {commits_count} recent commits\n"
 
         # ── Stage 3: Build plan ────────────────────────────────
         yield "\n🧠 Planning...\n"
         plan = build_plan(user_input, intent, context)
         wm.set_plan(plan)
 
-        # Create session row in DB
+        # Create session row
         session = self.mem.start_session(
             raw_input=user_input,
             project_id=wm.active_project_id,
@@ -102,13 +94,21 @@ class Agent:
 
         # ── Stage 4: Show plan ─────────────────────────────────
         yield "\n" + format_plan_for_display(plan) + "\n"
+
+        # ── Stage 5: Surface loaded context ───────────────────
+        if wm.loaded_snapshot:
+            yield from self._render_snapshot(wm.loaded_snapshot)
+
+        if context.get("github"):
+            yield from self._render_github(context["github"])
+
         yield "\n▶ Executing...\n"
 
-        # ── Stage 5: Execute ───────────────────────────────────
+        # ── Stage 6: Execute ───────────────────────────────────
         executor = Executor(session.id, wm, self.mem)
         yield from executor.run(plan)
 
-        # ── Stage 6: Summarize ─────────────────────────────────
+        # ── Stage 7: Summarize ─────────────────────────────────
         yield "\n💾 Saving session...\n"
         try:
             summary = summarize_session(wm)
@@ -118,16 +118,13 @@ class Agent:
                     session_id=session.id,
                     **summary,
                 )
-                # Index in semantic memory
-                from memory.semantic import SemanticMemory
-                sem = SemanticMemory(settings.chroma_path)
                 if summary.get("summary"):
-                    sem.upsert_snapshot(
+                    self.sem.upsert_snapshot(
                         session.id,
                         f"{wm.active_project_id}: {summary['summary']}",
                         metadata={"project_id": wm.active_project_id},
                     )
-                    sem.upsert_project(
+                    self.sem.upsert_project(
                         wm.active_project_id,
                         f"{wm.active_project_id}: {summary['summary']}",
                         metadata={"project_id": wm.active_project_id},
@@ -138,10 +135,55 @@ class Agent:
             self.mem.end_session(session.id, status="failed", error=str(e))
             yield f"⚠ Could not save session: {e}\n"
 
+    def _load_github_context(self, repo: str) -> dict:
+        try:
+            from core.mcp_client import call_mcp_tool
+            issues_resp  = call_mcp_tool("get_open_issues", {"repo": repo})
+            commits_resp = call_mcp_tool("get_recent_commits", {"repo": repo, "n": 5})
+            
+            return {
+                "repo":           repo,
+                "open_issues":    issues_resp.get("output", []) if issues_resp.get("success") else [],
+                "recent_commits": commits_resp.get("output", []) if commits_resp.get("success") else [],
+            }
+        except ConnectionError as e:
+            print(f"DEBUG connection error: {e}")
+            return {}
+        except Exception as e:
+            print(f"DEBUG exception: {e}")
+            return {}
+
+    def _render_snapshot(self, snapshot: dict) -> Generator[str, None, None]:
+        """Surface the loaded memory snapshot to the user before execution."""
+        yield "\n📌 Last session context:\n"
+        if snapshot.get("current_goal"):
+            yield f"   Goal:       {snapshot['current_goal']}\n"
+        if snapshot.get("last_action"):
+            yield f"   Last:       {snapshot['last_action']}\n"
+        if snapshot.get("next_step"):
+            yield f"   Next:       {snapshot['next_step']}\n"
+        if snapshot.get("blockers"):
+            for b in snapshot["blockers"]:
+                yield f"   ⚠ Blocker: {b}\n"
+        if snapshot.get("open_questions"):
+            for q in snapshot["open_questions"]:
+                yield f"   ❓ {q}\n"
+
+    def _render_github(self, gh: dict) -> Generator[str, None, None]:
+        """Surface GitHub context to the user before execution."""
+        yield f"\n🐙 GitHub — {gh['repo']}:\n"
+        commits = gh.get("recent_commits", [])
+        if commits:
+            yield f"   Last commit: {commits[0].get('message', '')} ({commits[0].get('date', '')[:10]})\n"
+        issues = gh.get("open_issues", [])
+        if issues:
+            yield f"   Open issues ({len(issues)}):\n"
+            for issue in issues[:3]:
+                yield f"     #{issue['number']} {issue['title']}\n"
+
     def close(self):
         self.mem.close()
 
 
 def _slugify(text: str) -> str:
-    """Quick slug for project hints that don't match a known project."""
     return text.lower().strip().replace(" ", "-").replace("_", "-")

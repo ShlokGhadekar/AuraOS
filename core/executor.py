@@ -54,6 +54,7 @@ TOOL_DISPLAY = {
     "list_repos":              "🐙 Fetching repos",
     "get_open_issues":         "🐙 Fetching issues",
     "get_recent_commits":      "🐙 Fetching commits",
+    "synthesize_daily_plan": "🗓  Building your day"
 }
 
 
@@ -144,39 +145,102 @@ class Executor:
         yield "\n✅ Done.\n"
 
     def _execute_tool(self, tool_name: str, params: dict):
+        from tools.base import ToolResult
+
+        # Special synthesizer — runs locally using accumulated tool results
+        if tool_name == "synthesize_daily_plan":
+            return self._synthesize_daily_plan()
+
+        # Try local tool first
         local_name = MCP_TO_LOCAL.get(tool_name, tool_name)
         tool = ALL_TOOLS.get(local_name)
-        if tool is None:
-            from tools.base import ToolResult
-            # Graceful skip for MCP-only tools
-            MCP_ONLY = {
-                "get_today_events", "get_upcoming_deadlines",
-                "get_project_context", "get_current_snapshot",
-                "identify_project", "search_projects_semantic",
-                "list_goals", "add_goal", "get_recent_sessions",
-                "list_repos", "get_open_issues", "get_recent_commits",
-                "get_repo_info", "save_context_snapshot",
-            }
-            if tool_name in MCP_ONLY:
-                return ToolResult(
-                    success=True,
-                    tool_name=tool_name,
-                    message=f"⏭  {tool_name} skipped (MCP server not running)",
-                    output=None,
-                )
-            return ToolResult(
-                success=False,
-                tool_name=tool_name,
-                error=f"Tool '{tool_name}' not found.",
-            )
+        if tool:
+            try:
+                return tool.timed_execute(**params)
+            except TypeError as e:
+                return ToolResult(success=False, tool_name=tool_name,
+                                error=f"Invalid parameters: {e}")
+
+        # Fall through to MCP client
         try:
-            return tool.timed_execute(**params)
-        except TypeError as e:
-            from tools.base import ToolResult
+            from core.mcp_client import call_mcp_tool
+            data = call_mcp_tool(tool_name, params)
+            return ToolResult(
+                success=data.get("success", False),
+                tool_name=tool_name,
+                output=data.get("output"),
+                message=data.get("message", f"{tool_name} completed"),
+                error=data.get("error", ""),
+            )
+        except ConnectionError:
+            return ToolResult(
+                success=True,
+                tool_name=tool_name,
+                message=f"⏭  {tool_name} skipped (server offline)",
+                output=None,
+            )
+        except Exception as e:
+            return ToolResult(success=False, tool_name=tool_name, error=str(e))
+
+
+    def _synthesize_daily_plan(self):
+        """
+        Synthesize a daily plan from accumulated tool results.
+        Called as the final step of daily_planning intent.
+        """
+        from tools.base import ToolResult
+        import json
+        from groq import Groq
+        from config.settings import settings
+
+        events_result = self.wm.get_tool_result("get_today_events")
+        goals_result  = self.wm.get_tool_result("list_goals")
+
+        events = []
+        if isinstance(events_result, dict):
+            events = events_result.get("events", [])
+
+        goals = []
+        if isinstance(goals_result, list):
+            goals = goals_result
+        elif isinstance(goals_result, dict):
+            goals = goals_result.get("output", [])
+
+        client = Groq(api_key=settings.groq_api_key)
+
+        prompt = f"""You are AuraOS, an AI personal computing environment.
+
+    The user asked: "what should I work on today?"
+
+    Today's calendar events:
+    {json.dumps(events, indent=2) if events else "No events today."}
+
+    Active goals:
+    {json.dumps(goals, indent=2) if goals else "No goals set."}
+
+    Write a concise, prioritized daily plan for the user. Be specific and actionable.
+    Format it clearly — lead with the top 3 priorities, note any time blocks from calendar,
+    and flag anything that should be done first. Keep it under 150 words."""
+
+        try:
+            response = client.chat.completions.create(
+                model=settings.planner_model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=300,
+                temperature=0.3,
+            )
+            plan_text = response.choices[0].message.content.strip()
+            return ToolResult(
+                success=True,
+                tool_name="synthesize_daily_plan",
+                message=f"\n{'─'*48}\n{plan_text}\n{'─'*48}",
+                output={"plan": plan_text},
+            )
+        except Exception as e:
             return ToolResult(
                 success=False,
-                tool_name=tool_name,
-                error=f"Invalid parameters for {tool_name}: {e}",
+                tool_name="synthesize_daily_plan",
+                error=f"Synthesis failed: {e}",
             )
 
     def _format_output(self, tool_name: str, output: dict) -> Generator[str, None, None]:
