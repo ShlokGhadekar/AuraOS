@@ -44,7 +44,9 @@ Available tools:
 Rules:
 1. Use the minimum tools needed — don't over-plan
 2. Always load memory context BEFORE opening apps
-3. For 'continue_project': identify_project → get_project_context → detect_project → open_vscode_workspace
+3. For 'continue_project': context is already pre-loaded by the agent.
+   Plan should be: detect_project → open_vscode_workspace → (open relevant files if known)
+   Do NOT call identify_project or get_project_context — already done.
 4. For 'daily_planning': get_today_events → list_goals → synthesize_daily_plan
 5. For destructive steps, set requires_confirmation=true
 6. Never fabricate project paths — use detect_project to find them
