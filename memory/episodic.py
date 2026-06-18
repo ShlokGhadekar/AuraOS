@@ -156,6 +156,7 @@ class EpisodicMemory:
             self.db_path,
             check_same_thread=False,
             detect_types=sqlite3.PARSE_DECLTYPES,
+            timeout=30
         )
         self._conn.row_factory = sqlite3.Row
         self._apply_schema()
