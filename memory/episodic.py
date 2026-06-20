@@ -170,19 +170,28 @@ class EpisodicMemory:
 
     # ── internal ──────────────────────────────────────────────
 
-    def _exec(self, sql: str, params: tuple = (), retries: int = 3) -> sqlite3.Cursor:
+    def _exec(self, sql: str, params: tuple = (), retries: int = 8) -> sqlite3.Cursor:
         import time as _time
         for attempt in range(retries):
             try:
                 return self._conn.execute(sql, params)
             except sqlite3.OperationalError as e:
                 if "locked" in str(e) and attempt < retries - 1:
-                    _time.sleep(0.1 * (attempt + 1))
+                    _time.sleep(0.05 * (2 ** attempt))  # exponential backoff: 50ms, 100ms, 200ms...
                     continue
                 raise
 
-    def _commit(self):
-        self._conn.commit()
+    def _commit(self, retries: int = 8):
+        import time as _time
+        for attempt in range(retries):
+            try:
+                self._conn.commit()
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < retries - 1:
+                    _time.sleep(0.05 * (2 ** attempt))
+                    continue
+                raise
 
 
     # ── PROJECTS ──────────────────────────────────────────────
