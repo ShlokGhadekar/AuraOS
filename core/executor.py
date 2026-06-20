@@ -3,13 +3,8 @@ AuraOS · Executor
 =================
 Runs the plan produced by the planner.
 Streams progress tokens to the caller as it goes.
-Logs every tool call to episodic memory.
-
-Key design decisions:
-- Yields strings (progress tokens) via a generator
-- Each tool call is logged to SQLite before + after execution
-- requires_confirmation steps pause and yield a confirmation prompt
-- Tool results are stored in WorkingMemory for the summarizer
+Logs every tool call via the memory MCP server (not direct SQLite)
+to avoid multi-writer lock contention.
 """
 import json
 import time
@@ -38,10 +33,10 @@ MCP_TO_LOCAL = {
     "list_projects":         "list_projects",
     "quit_apps":             "quit_apps",
     "set_do_not_disturb":    "set_do_not_disturb",
+    "open_url":              "open_url",
     "git_status":            "git_status",
     "git_commit":            "git_commit",
     "git_init_and_push":     "git_init_and_push",
-    "open_url": "open_url",
 }
 
 TOOL_DISPLAY = {
@@ -61,7 +56,13 @@ TOOL_DISPLAY = {
     "list_repos":              "🐙 Fetching repos",
     "get_open_issues":         "🐙 Fetching issues",
     "get_recent_commits":      "🐙 Fetching commits",
-    "synthesize_daily_plan": "🗓  Building your day"
+    "synthesize_daily_plan":   "🗓  Building your day",
+    "quit_apps":               "🔇 Quitting apps",
+    "set_do_not_disturb":      "🌙 Setting focus mode",
+    "open_url":                "🌐 Opening URL",
+    "git_status":              "📊 Checking git status",
+    "git_commit":              "💾 Committing changes",
+    "save_context_snapshot":   "💾 Saving snapshot",
 }
 
 
@@ -83,7 +84,7 @@ class Executor:
     ):
         self.session_id = session_id
         self.wm = wm
-        self.mem = mem
+        self.mem = mem  # kept for reads only — writes go through MCP
 
     def run(self, plan: list[dict]) -> Generator[str, None, None]:
         """
@@ -91,7 +92,6 @@ class Executor:
         Yields human-readable progress strings.
         """
         yield "\n"
-        total = len(plan)
 
         for i, step in enumerate(plan):
             tool_name = step.get("tool", "")
@@ -101,33 +101,27 @@ class Executor:
             display = TOOL_DISPLAY.get(tool_name, f"⚙️  {tool_name}")
             yield f"{display}...\n"
 
-            # Confirmation gate
             if needs_confirm:
                 yield f"  ⚠️  This step requires confirmation: {step.get('reason', '')}\n"
-                yield "  Type 'yes' to proceed or 'skip' to skip this step.\n"
-                # In CLI mode, we auto-proceed. The overlay will handle this interactively.
-                # For now, proceed automatically (Phase 1 scope).
+                yield "  Proceeding automatically in CLI mode.\n"
 
-            # Log to episodic memory
-            call_log = self.mem.log_tool_call(
-                session_id=self.session_id,
-                tool_name=tool_name,
-                parameters=params,
-            )
+            # Log to memory via MCP (avoids direct SQLite write contention)
+            call_id = self._log_tool_call(tool_name, params)
 
             # Execute the tool
             start = time.monotonic()
             result = self._execute_tool(tool_name, params)
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            # Update plan step status
-            self.wm.mark_step_done(i, result=result.output if result else None) \
-                if (result and result.success) \
-                else self.wm.mark_step_failed(i, error=result.error if result else "unknown")
+            # Update plan step status in working memory (in-process, no DB)
+            if result and result.success:
+                self.wm.mark_step_done(i, result=result.output)
+            else:
+                self.wm.mark_step_failed(i, error=result.error if result else "unknown")
 
-            # Log result to episodic memory
-            self.mem.complete_tool_call(
-                call_log.id,
+            # Complete the tool call log via MCP
+            self._complete_tool_call(
+                call_id,
                 status="success" if (result and result.success) else "failed",
                 result=json.dumps(result.output, default=str) if (result and result.output) else None,
                 duration_ms=duration_ms,
@@ -141,20 +135,55 @@ class Executor:
             # Stream result
             if result and result.success:
                 yield f"  ✓ {result.message} ({duration_ms}ms)\n"
-                # Surface key output fields
                 if result.output and isinstance(result.output, dict):
                     yield from self._format_output(tool_name, result.output)
             else:
                 error = result.error if result else "Tool not found"
                 yield f"  ✗ Failed: {error}\n"
-                # Non-fatal: continue with remaining steps
 
         yield "\n✅ Done.\n"
+
+    def _log_tool_call(self, tool_name: str, params: dict) -> str | None:
+        """Log a pending tool call via the memory MCP server. Returns call_id or None."""
+        try:
+            from core.mcp_client import call_mcp_tool
+            resp = call_mcp_tool("log_tool_call", {
+                "session_id": self.session_id,
+                "tool_name": tool_name,
+                "parameters": params,
+            })
+            if resp.get("success"):
+                return resp["output"]["id"]
+        except Exception:
+            pass
+        return None
+
+    def _complete_tool_call(
+        self,
+        call_id: str | None,
+        status: str,
+        result: str = None,
+        duration_ms: int = None,
+        error: str = None,
+    ):
+        """Complete a tool call log via the memory MCP server. No-op if call_id is None."""
+        if call_id is None:
+            return
+        try:
+            from core.mcp_client import call_mcp_tool
+            call_mcp_tool("complete_tool_call", {
+                "call_id": call_id,
+                "status": status,
+                "result": result,
+                "duration_ms": duration_ms,
+                "error": error,
+            })
+        except Exception:
+            pass
 
     def _execute_tool(self, tool_name: str, params: dict):
         from tools.base import ToolResult
 
-        # Special synthesizer — runs locally using accumulated tool results
         if tool_name == "synthesize_daily_plan":
             return self._synthesize_daily_plan()
 
@@ -166,7 +195,7 @@ class Executor:
                 return tool.timed_execute(**params)
             except TypeError as e:
                 return ToolResult(success=False, tool_name=tool_name,
-                                error=f"Invalid parameters: {e}")
+                                  error=f"Invalid parameters: {e}")
 
         # Fall through to MCP client
         try:
@@ -189,14 +218,9 @@ class Executor:
         except Exception as e:
             return ToolResult(success=False, tool_name=tool_name, error=str(e))
 
-
     def _synthesize_daily_plan(self):
-        """
-        Synthesize a daily plan from accumulated tool results.
-        Called as the final step of daily_planning intent.
-        """
+        """Synthesize a daily plan from accumulated tool results."""
         from tools.base import ToolResult
-        import json
         from groq import Groq
         from config.settings import settings
 
@@ -217,17 +241,17 @@ class Executor:
 
         prompt = f"""You are AuraOS, an AI personal computing environment.
 
-    The user asked: "what should I work on today?"
+The user asked: "what should I work on today?"
 
-    Today's calendar events:
-    {json.dumps(events, indent=2) if events else "No events today."}
+Today's calendar events:
+{json.dumps(events, indent=2) if events else "No events today."}
 
-    Active goals:
-    {json.dumps(goals, indent=2) if goals else "No goals set."}
+Active goals:
+{json.dumps(goals, indent=2) if goals else "No goals set."}
 
-    Write a concise, prioritized daily plan for the user. Be specific and actionable.
-    Format it clearly — lead with the top 3 priorities, note any time blocks from calendar,
-    and flag anything that should be done first. Keep it under 150 words."""
+Write a concise, prioritized daily plan for the user. Be specific and actionable.
+Format it clearly — lead with the top 3 priorities, note any time blocks from calendar,
+and flag anything that should be done first. Keep it under 150 words."""
 
         try:
             response = client.chat.completions.create(

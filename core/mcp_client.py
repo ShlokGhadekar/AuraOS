@@ -24,6 +24,13 @@ TOOL_ROUTING = {
     "list_goals":               settings.port_memory,
     "add_goal":                 settings.port_memory,
     "get_recent_sessions":      settings.port_memory,
+    "start_session":         settings.port_memory,
+    "end_session":           settings.port_memory,
+    "log_tool_call":         settings.port_memory,
+    "complete_tool_call":    settings.port_memory,
+    "update_session_plan":   settings.port_memory,
+    "touch_project":         settings.port_memory,
+    "upsert_project": settings.port_memory,
 
     # Calendar server (8104)
     "get_today_events":         settings.port_calendar,
@@ -92,3 +99,26 @@ def server_status() -> dict:
         "calendar":   is_server_running(settings.port_calendar),
         "github":     is_server_running(settings.port_github),
     }
+
+def mcp_start_session(raw_input: str, project_id: str = None, intent: str = None) -> dict:
+    """Start a session via the memory server (avoids local SQLite write contention)."""
+    return call_mcp_tool("start_session", {
+        "raw_input": raw_input, "project_id": project_id, "intent": intent,
+    })
+
+def mcp_end_session(session_id: str, status: str = "completed", error: str = None) -> dict:
+    return call_mcp_tool("end_session", {
+        "session_id": session_id, "status": status, "error": error,
+    })
+
+def mcp_log_tool_call(session_id: str, tool_name: str, parameters: dict = None) -> dict:
+    return call_mcp_tool("log_tool_call", {
+        "session_id": session_id, "tool_name": tool_name, "parameters": parameters or {},
+    })
+
+def mcp_complete_tool_call(call_id: str, status: str, result: str = None,
+                             duration_ms: int = None, error: str = None) -> dict:
+    return call_mcp_tool("complete_tool_call", {
+        "call_id": call_id, "status": status, "result": result,
+        "duration_ms": duration_ms, "error": error,
+    })

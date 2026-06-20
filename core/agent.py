@@ -3,6 +3,10 @@ AuraOS · Agent
 ==============
 Main entry point. Wires together:
   classify → load context → plan → show plan → execute → summarize
+
+All SQLite writes (start_session, end_session, etc.) go through the
+memory MCP server via core.mcp_client to avoid multi-writer lock
+contention. EpisodicMemory is used here for reads only.
 """
 import sys
 from pathlib import Path
@@ -10,12 +14,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import ssl
 import certifi
 ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
+
 from collections.abc import Generator
+from types import SimpleNamespace
 
 from core.intent import classify_intent
 from core.planner import build_plan, format_plan_for_display
 from core.executor import Executor
 from core.summarizer import summarize_session
+from core.mcp_client import call_mcp_tool, mcp_start_session, mcp_end_session
 from memory.episodic import EpisodicMemory
 from memory.semantic import SemanticMemory
 from memory.working import WorkingMemory
@@ -24,7 +31,7 @@ from config.settings import settings
 
 class Agent:
     def __init__(self):
-        self.mem = EpisodicMemory(settings.db_path)
+        self.mem = EpisodicMemory(settings.db_path)  # reads only
         self.sem = SemanticMemory(settings.chroma_path)
 
     def run(self, user_input: str) -> Generator[str, None, None]:
@@ -38,7 +45,7 @@ class Agent:
         wm.intent = intent.get("intent")
         yield f"   Intent: {intent.get('intent')} ({intent.get('confidence', 0):.0%})\n"
 
-        # Check if this matches a workflow before planning
+        # ── Workflow path ───────────────────────────────────────
         from core.workflow_engine import match_workflow, build_workflow_context, WorkflowExecutor
 
         workflow = match_workflow(user_input)
@@ -59,17 +66,14 @@ class Agent:
         if workflow:
             yield f"   Workflow: {workflow['name']}\n"
 
-            # Resolve project context even for workflows, using the project_hint
             project_hint = intent.get("project_hint")
             if project_hint and not wm.active_project_id:
                 project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
                 wm.set_project(project_id)
 
-            session = self.mem.start_session(
-                raw_input=user_input,
-                project_id=wm.active_project_id,
-                intent=intent.get("intent"),
-            )
+            # Start session via MCP (no direct SQLite write)
+            resp = mcp_start_session(user_input, wm.active_project_id, intent.get("intent"))
+            session = SimpleNamespace(**resp["output"])
             wm.session_id = session.id
 
             agent_ctx = {
@@ -77,19 +81,18 @@ class Agent:
                 "active_project_path": "",
             }
             if wm.active_project_id:
-                project = self.mem.get_project(wm.active_project_id)
+                project = self.mem.get_project(wm.active_project_id)  # read, safe
                 if project:
                     agent_ctx["active_project_path"] = project.path
 
             wf_context = build_workflow_context(workflow, user_input, agent_ctx)
 
-            from core.executor import Executor
             executor = Executor(session.id, wm, self.mem)
             wf_executor = WorkflowExecutor(workflow, wf_context, executor)
             yield from wf_executor.run()
 
-            self.mem.end_session(session.id, status="completed")
-            return 
+            mcp_end_session(session.id, status="completed")
+            return
 
         # ── Stage 2: Load context ──────────────────────────────
         context = {}
@@ -100,16 +103,15 @@ class Agent:
             project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
             wm.set_project(project_id)
 
-            # Ensure project exists in SQLite
+            # Ensure project exists — this is a write, route through MCP
             if not self.mem.get_project(project_id):
-                self.mem.upsert_project(
-                    id=project_id,
-                    name=project_hint or project_id,
-                    path=str(Path.home() / "Documents" / project_id),
-                )
+                call_mcp_tool("upsert_project" , {
+                    "id": project_id,
+                    "name": project_hint or project_id,
+                    "path": str(Path.home() / "Documents" / project_id),
+                })
 
-            # Load episodic memory context
-            ctx = self.mem.get_project_context(project_id)
+            ctx = self.mem.get_project_context(project_id)  # read, safe
             if ctx.get("snapshot"):
                 wm.set_snapshot(ctx["snapshot"])
                 snap = ctx["snapshot"]
@@ -117,8 +119,7 @@ class Agent:
                 yield f"   Memory: {summary}\n"
             context = ctx
 
-            # Load GitHub context if repo is registered
-            project = self.mem.get_project(project_id)
+            project = self.mem.get_project(project_id)  # read, safe
             if project and project.github_repo:
                 yield f"   GitHub: fetching context for {project.github_repo}...\n"
                 gh_context = self._load_github_context(project.github_repo)
@@ -133,17 +134,15 @@ class Agent:
         plan = build_plan(user_input, intent, context)
         wm.set_plan(plan)
 
-        # Create session row
-        session = self.mem.start_session(
-            raw_input=user_input,
-            project_id=wm.active_project_id,
-            intent=wm.intent,
-        )
+        # Start session via MCP (no direct SQLite write)
+        resp = mcp_start_session(user_input, wm.active_project_id, wm.intent)
+        session = SimpleNamespace(**resp["output"])
         wm.session_id = session.id
-        self.mem.update_session_plan(session.id, plan)
+
+        call_mcp_tool("update_session_plan", {"session_id": session.id, "plan": plan})
 
         if wm.active_project_id:
-            self.mem.touch_project(wm.active_project_id)
+            call_mcp_tool("touch_project", {"project_id": wm.active_project_id})
 
         # ── Stage 4: Show plan ─────────────────────────────────
         yield "\n" + format_plan_for_display(plan) + "\n"
@@ -166,11 +165,12 @@ class Agent:
         try:
             summary = summarize_session(wm)
             if summary and wm.active_project_id:
-                self.mem.save_snapshot(
-                    project_id=wm.active_project_id,
-                    session_id=session.id,
+                # save_context_snapshot via MCP (write)
+                call_mcp_tool("save_context_snapshot", {
+                    "project_id": wm.active_project_id,
+                    "session_id": session.id,
                     **summary,
-                )
+                })
                 if summary.get("summary"):
                     self.sem.upsert_snapshot(
                         session.id,
@@ -182,32 +182,27 @@ class Agent:
                         f"{wm.active_project_id}: {summary['summary']}",
                         metadata={"project_id": wm.active_project_id},
                     )
-            self.mem.end_session(session.id, status="completed")
+            mcp_end_session(session.id, status="completed")
             yield "✓ Session saved.\n"
         except Exception as e:
-            self.mem.end_session(session.id, status="failed", error=str(e))
+            mcp_end_session(session.id, status="failed", error=str(e))
             yield f"⚠ Could not save session: {e}\n"
 
     def _load_github_context(self, repo: str) -> dict:
         try:
-            from core.mcp_client import call_mcp_tool
             issues_resp  = call_mcp_tool("get_open_issues", {"repo": repo})
             commits_resp = call_mcp_tool("get_recent_commits", {"repo": repo, "n": 5})
-            
             return {
                 "repo":           repo,
                 "open_issues":    issues_resp.get("output", []) if issues_resp.get("success") else [],
                 "recent_commits": commits_resp.get("output", []) if commits_resp.get("success") else [],
             }
-        except ConnectionError as e:
-            print(f"DEBUG connection error: {e}")
+        except ConnectionError:
             return {}
-        except Exception as e:
-            print(f"DEBUG exception: {e}")
+        except Exception:
             return {}
 
     def _render_snapshot(self, snapshot: dict) -> Generator[str, None, None]:
-        """Surface the loaded memory snapshot to the user before execution."""
         yield "\n📌 Last session context:\n"
         if snapshot.get("current_goal"):
             yield f"   Goal:       {snapshot['current_goal']}\n"
@@ -223,7 +218,6 @@ class Agent:
                 yield f"   ❓ {q}\n"
 
     def _render_github(self, gh: dict) -> Generator[str, None, None]:
-        """Surface GitHub context to the user before execution."""
         yield f"\n🐙 GitHub — {gh['repo']}:\n"
         commits = gh.get("recent_commits", [])
         if commits:

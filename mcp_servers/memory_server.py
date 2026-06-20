@@ -109,7 +109,73 @@ def get_recent_sessions(req: ToolRequest):
     )
     return {"success": True, "output": [asdict(s) for s in sessions]}
 
+@app.post("/tools/start_session")
+def start_session(req: ToolRequest):
+    p = req.params
+    session = mem.start_session(
+        raw_input=p.get("raw_input"),
+        project_id=p.get("project_id"),
+        intent=p.get("intent"),
+    )
+    return {"success": True, "output": asdict(session)}
 
+
+@app.post("/tools/end_session")
+def end_session(req: ToolRequest):
+    p = req.params
+    session = mem.end_session(
+        session_id=p.get("session_id"),
+        status=p.get("status", "completed"),
+        error=p.get("error"),
+    )
+    return {"success": True, "output": asdict(session)}
+
+
+@app.post("/tools/log_tool_call")
+def log_tool_call(req: ToolRequest):
+    p = req.params
+    call = mem.log_tool_call(
+        session_id=p.get("session_id"),
+        tool_name=p.get("tool_name"),
+        parameters=p.get("parameters", {}),
+    )
+    return {"success": True, "output": asdict(call)}
+
+
+@app.post("/tools/complete_tool_call")
+def complete_tool_call(req: ToolRequest):
+    p = req.params
+    mem.complete_tool_call(
+        call_id=p.get("call_id"),
+        status=p.get("status"),
+        result=p.get("result"),
+        duration_ms=p.get("duration_ms"),
+        error=p.get("error"),
+    )
+    return {"success": True}
+
+
+@app.post("/tools/update_session_plan")
+def update_session_plan(req: ToolRequest):
+    p = req.params
+    mem.update_session_plan(p.get("session_id"), p.get("plan", []))
+    return {"success": True}
+
+
+@app.post("/tools/touch_project")
+def touch_project(req: ToolRequest):
+    mem.touch_project(req.params.get("project_id"))
+    return {"success": True}
 if __name__ == "__main__":
     print(f"[memory-server] starting on port {settings.port_memory}")
     uvicorn.run(app, host="127.0.0.1", port=settings.port_memory, log_level="warning")
+
+@app.post("/tools/upsert_project")
+def upsert_project(req: ToolRequest):
+    p = req.params
+    project = mem.upsert_project(
+        id=p.get("id"), name=p.get("name"), path=p.get("path"),
+        description=p.get("description"), github_repo=p.get("github_repo"),
+        tags=p.get("tags", []),
+    )
+    return {"success": True, "output": asdict(project)}

@@ -12,18 +12,21 @@ steps:
     tool: git_status
     params:
       path: "{active_project_path}"
+    skip_if_missing: ["active_project_path"]
 
   - name: Git add and commit
     tool: git_commit
     params:
       path: "{active_project_path}"
-      message: "{auto_commit_message}"
+      message: "End of day commit — auto-saved by AuraOS"
     requires_confirmation: true
+    skip_if_missing: ["active_project_path"]
 
   - name: Save session snapshot
     tool: save_context_snapshot
     params:
       project_id: "{active_project_id}"
+    skip_if_missing: ["active_project_id"]
 
   - name: Generate tomorrow plan
     tool: synthesize_daily_plan
