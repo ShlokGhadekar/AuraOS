@@ -1,9 +1,9 @@
 // AuraOS · Calendar Bridge
-// Fetches calendar events using EventKit (native macOS API)
 // Usage:
 //   swift scripts/calendar_bridge.swift today
 //   swift scripts/calendar_bridge.swift range 7
 //   swift scripts/calendar_bridge.swift calendars
+//   swift scripts/calendar_bridge.swift create "<title>" "<start_iso>" "<end_iso>" "<notes>"
 
 import EventKit
 import Foundation
@@ -32,21 +32,21 @@ func requestAccess() -> Bool {
 func formatEvent(_ event: EKEvent) -> [String: Any] {
     let formatter = ISO8601DateFormatter()
     return [
-        "title":    event.title ?? "Untitled",
-        "start":    formatter.string(from: event.startDate),
-        "end":      formatter.string(from: event.endDate),
+        "title": event.title ?? "Untitled",
+        "start": formatter.string(from: event.startDate),
+        "end": formatter.string(from: event.endDate),
         "calendar": event.calendar.title,
         "location": event.location ?? "",
-        "notes":    event.notes ?? "",
-        "all_day":  event.isAllDay,
+        "notes": event.notes ?? "",
+        "all_day": event.isAllDay,
     ]
 }
 
 func eventsToday() {
     let calendar = Calendar.current
     let start = calendar.startOfDay(for: Date())
-    let end   = calendar.date(byAdding: .day, value: 1, to: start)!
-    let pred  = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+    let end = calendar.date(byAdding: .day, value: 1, to: start)!
+    let pred = store.predicateForEvents(withStart: start, end: end, calendars: nil)
     let events = store.events(matching: pred).map { formatEvent($0) }
     let data = try! JSONSerialization.data(withJSONObject: events)
     print(String(data: data, encoding: .utf8)!)
@@ -54,8 +54,8 @@ func eventsToday() {
 
 func eventsInRange(days: Int) {
     let start = Calendar.current.startOfDay(for: Date())
-    let end   = Calendar.current.date(byAdding: .day, value: days, to: start)!
-    let pred  = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+    let end = Calendar.current.date(byAdding: .day, value: days, to: start)!
+    let pred = store.predicateForEvents(withStart: start, end: end, calendars: nil)
     let events = store.events(matching: pred).map { formatEvent($0) }
     let data = try! JSONSerialization.data(withJSONObject: events)
     print(String(data: data, encoding: .utf8)!)
@@ -65,6 +65,38 @@ func listCalendars() {
     let cals = store.calendars(for: .event).map { ["title": $0.title, "type": $0.type.rawValue] }
     let data = try! JSONSerialization.data(withJSONObject: cals)
     print(String(data: data, encoding: .utf8)!)
+}
+
+func createEvent(title: String, startISO: String, endISO: String, notes: String) {
+    let formatter = ISO8601DateFormatter()
+    guard let start = formatter.date(from: startISO),
+          let end = formatter.date(from: endISO) else {
+        print("{\"error\": \"Invalid date format. Use ISO8601, e.g. 2026-06-21T14:00:00Z\"}")
+        exit(1)
+    }
+
+    let event = EKEvent(eventStore: store)
+    event.title = title
+    event.startDate = start
+    event.endDate = end
+    event.notes = notes.isEmpty ? nil : notes
+    event.calendar = store.defaultCalendarForNewEvents
+
+    do {
+        try store.save(event, span: .thisEvent)
+        let result: [String: Any] = [
+            "success": true,
+            "title": title,
+            "start": startISO,
+            "end": endISO,
+            "calendar": event.calendar.title,
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: result)
+        print(String(data: data, encoding: .utf8)!)
+    } catch {
+        print("{\"error\": \"Failed to save event: \(error.localizedDescription)\"}")
+        exit(1)
+    }
 }
 
 // Main
@@ -83,6 +115,12 @@ case "range":
     eventsInRange(days: days)
 case "calendars":
     listCalendars()
+case "create":
+    guard args.count >= 5 else {
+        print("{\"error\": \"create requires: title start_iso end_iso notes\"}")
+        exit(1)
+    }
+    createEvent(title: args[2], startISO: args[3], endISO: args[4], notes: args.count > 5 ? args[5] : "")
 default:
     print("{\"error\": \"Unknown command: \(command)\"}")
     exit(1)
