@@ -32,6 +32,9 @@ TOOL_ROUTING = {
     "touch_project":         settings.port_memory,
     "upsert_project": settings.port_memory,
     "create_github_repo": settings.port_github,
+    "create_issue":         settings.port_github,
+    "close_issue":          settings.port_github,
+    "create_pull_request":  settings.port_github,
 
     # Calendar server (8104)
     "get_today_events":         settings.port_calendar,

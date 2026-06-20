@@ -17,4 +17,15 @@ projects:
   - python
   - ml
   - nlp
-
+- id: python practise
+  name: python practise
+  path: ~/Documents/Projects and stuff/python practise
+  description: ''
+  github_repo: ShlokGhadekar/python-practise
+  tags: []
+- id: test1
+  name: test1
+  path: ~/Documents/Projects and stuff/test1
+  description: ''
+  github_repo: ShlokGhadekar/test1
+  tags: []

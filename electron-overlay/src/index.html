@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --bg:         rgba(15, 16, 20, 0.92);
+    --border:     rgba(255, 255, 255, 0.07);
+    --text:       #EDEAE3;
+    --text-dim:   rgba(237, 234, 227, 0.42);
+    --text-faint: rgba(237, 234, 227, 0.22);
+    --accent:     #FF9F0A;
+    --accent-soft:rgba(255, 159, 10, 0.10);
+    --success:    #30D158;
+    --error:      #FF453A;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: transparent;
+    overflow: hidden;
+    font-family: -apple-system, "SF Pro Display", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+  }
+
+  #panel {
+    background: var(--bg);
+    backdrop-filter: blur(44px) saturate(160%);
+    -webkit-backdrop-filter: blur(44px) saturate(160%);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    box-shadow: 0 24px 70px rgba(0,0,0,0.55), 0 0 0 0.5px rgba(255,255,255,0.04) inset;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    opacity: 0;
+    transform: translateY(-10px) scale(0.97);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+
+  #panel.visible { opacity: 1; transform: translateY(0) scale(1); }
+
+  /* ── Greeting state ─────────────────────────────────────── */
+
+  #greeting {
+    padding: 22px 22px 4px;
+  }
+
+  #greeting-text {
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text);
+  }
+
+  #greeting-sub {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 3px;
+  }
+
+  /* ── Input row ───────────────────────────────────────────── */
+
+  #input-row {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    gap: 12px;
+    border-bottom: 1px solid transparent;
+  }
+
+  #input-row.has-output { border-bottom-color: var(--border); }
+
+  #glyph {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    box-shadow: 0 0 10px var(--accent);
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+
+  #glyph.busy { animation: pulse 1.05s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.35; transform: scale(0.65); }
+  }
+
+  #input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 450;
+    letter-spacing: -0.01em;
+    caret-color: var(--accent);
+  }
+
+  #input::placeholder { color: var(--text-faint); }
+
+  #hint {
+    font-size: 11px;
+    color: var(--text-faint);
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  #hint.visible { opacity: 1; }
+
+  /* ── Quick actions ───────────────────────────────────────── */
+
+  #actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 2px 20px 18px;
+  }
+
+  .action-chip {
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 7px 12px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    letter-spacing: -0.005em;
+  }
+
+  .action-chip:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: rgba(255, 159, 10, 0.25);
+  }
+
+  .action-chip .chip-emoji {
+    margin-right: 5px;
+    opacity: 0.9;
+  }
+
+  /* ── Output ──────────────────────────────────────────────── */
+
+  #output {
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--text);
+    padding: 16px 20px 18px;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: none;
+  }
+
+  #output.visible { display: block; }
+  #output::-webkit-scrollbar { width: 6px; }
+  #output::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+
+  .line-success { color: var(--success); }
+  .line-error   { color: var(--error); }
+  .line-accent  { color: var(--accent); }
+  .line-dim     { color: var(--text-faint); }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <div id="greeting">
+    <div id="greeting-text">Hey Shlok 👋</div>
+    <div id="greeting-sub">What do you want to do?</div>
+  </div>
+
+  <div id="input-row">
+    <div id="glyph"></div>
+    <input id="input" type="text" placeholder="Type a command, or pick one below..." autofocus />
+    <div id="hint">↵ run · esc close</div>
+  </div>
+
+  <div id="actions">
+    <div class="action-chip" data-cmd="what should I work on today?"><span class="chip-emoji">🎯</span>Plan my day</div>
+    <div class="action-chip" data-cmd="start dsa session"><span class="chip-emoji">🧠</span>DSA session</div>
+    <div class="action-chip" data-cmd="deep work"><span class="chip-emoji">🔇</span>Deep work</div>
+    <div class="action-chip" data-cmd="end of day"><span class="chip-emoji">🌙</span>Wrap up day</div>
+    <div class="action-chip" data-cmd="new project called "><span class="chip-emoji">✨</span>New project</div>
+  </div>
+
+  <div id="output"></div>
+</div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

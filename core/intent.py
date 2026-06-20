@@ -20,6 +20,7 @@ INTENTS = {
     "calendar_query":    "User is asking about their schedule or deadlines",
     "memory_query":      "User is asking about past sessions or what they worked on",
     "general_task":      "Multi-step task that doesn't fit above categories",
+    "github_write":  "User wants to create an issue, close an issue, or open a PR",
     "unknown":           "Cannot determine intent",
 }
 
@@ -36,6 +37,9 @@ even when the input is also a workflow trigger. Examples:
   "continue my auraos project" → intent: continue_project, project_hint: "auraos"
   "create a new project called task-tracker" → intent: project_kickoff, project_hint: "task-tracker"
   "new python project named weather-app" → intent: project_kickoff, project_hint: "weather-app"
+  "open an issue on auraos about the SQLite lock bug" → intent: github_write, project_hint: "auraos"
+  "close issue 3 on fake news project" → intent: github_write, project_hint: "fake news"
+  "create a PR for auraos" → intent: github_write, project_hint: "auraos"
 
 For project_kickoff intent, also extract project_type if mentioned (python, node, or react).
 Default to "python" if not specified.

@@ -188,6 +188,107 @@ def create_github_repo(req: ToolRequest):
     except urllib.error.URLError as e:
         return {"success": False, "error": f"Network error: {e.reason}"}
 
+@app.post("/tools/create_issue")
+def create_issue(req: ToolRequest):
+    p = req.params
+    repo = p.get("repo")
+    ctx = ssl.create_default_context(cafile=certifi.where())
+
+    body = json.dumps({
+        "title": p.get("title"),
+        "body": p.get("body", ""),
+        "labels": p.get("labels", []),
+    }).encode()
+
+    req_obj = urllib.request.Request(
+        f"{BASE}/repos/{repo}/issues",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {settings.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req_obj, timeout=15, context=ctx) as resp:
+            data = json.loads(resp.read())
+            return {"success": True, "output": {
+                "number": data["number"], "title": data["title"], "url": data["html_url"],
+            }}
+    except urllib.error.HTTPError as e:
+        return {"success": False, "error": f"GitHub API error {e.code}: {e.read().decode()}"}
+    except urllib.error.URLError as e:
+        return {"success": False, "error": f"Network error: {e.reason}"}
+
+
+@app.post("/tools/close_issue")
+def close_issue(req: ToolRequest):
+    p = req.params
+    repo = p.get("repo")
+    number = p.get("number")
+    ctx = ssl.create_default_context(cafile=certifi.where())
+
+    body = json.dumps({"state": "closed"}).encode()
+    req_obj = urllib.request.Request(
+        f"{BASE}/repos/{repo}/issues/{number}",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {settings.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        method="PATCH",
+    )
+    try:
+        with urllib.request.urlopen(req_obj, timeout=15, context=ctx) as resp:
+            data = json.loads(resp.read())
+            return {"success": True, "output": {
+                "number": data["number"], "state": data["state"], "url": data["html_url"],
+            }}
+    except urllib.error.HTTPError as e:
+        return {"success": False, "error": f"GitHub API error {e.code}: {e.read().decode()}"}
+    except urllib.error.URLError as e:
+        return {"success": False, "error": f"Network error: {e.reason}"}
+
+
+@app.post("/tools/create_pull_request")
+def create_pull_request(req: ToolRequest):
+    p = req.params
+    repo = p.get("repo")
+    ctx = ssl.create_default_context(cafile=certifi.where())
+
+    body = json.dumps({
+        "title": p.get("title"),
+        "body": p.get("body", ""),
+        "head": p.get("head"),
+        "base": p.get("base", "main"),
+    }).encode()
+
+    req_obj = urllib.request.Request(
+        f"{BASE}/repos/{repo}/pulls",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {settings.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req_obj, timeout=15, context=ctx) as resp:
+            data = json.loads(resp.read())
+            return {"success": True, "output": {
+                "number": data["number"], "title": data["title"], "url": data["html_url"],
+            }}
+    except urllib.error.HTTPError as e:
+        return {"success": False, "error": f"GitHub API error {e.code}: {e.read().decode()}"}
+    except urllib.error.URLError as e:
+        return {"success": False, "error": f"Network error: {e.reason}"}
+
 if __name__ == "__main__":
     print(f"[github-server] starting on port {settings.port_github}")
     uvicorn.run(app, host="127.0.0.1", port=settings.port_github, log_level="warning")

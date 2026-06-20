@@ -34,6 +34,9 @@ GITHUB TOOLS:
 - list_repos() → user's GitHub repos
 - get_open_issues(repo) → open issues for owner/repo
 - get_recent_commits(repo, n=10) → recent commits
+- create_issue(repo, title, body="", labels=[]) → create a new issue
+- close_issue(repo, number) → close an issue by number
+- create_pull_request(repo, title, head, base="main", body="") → open a PR
 """
 
 SYSTEM = """You are the task planner for AuraOS, an AI-powered personal computing environment on macOS.
@@ -51,7 +54,10 @@ Rules:
 5. For destructive steps, set requires_confirmation=true
 6. Never fabricate project paths — use detect_project to find them
 7. For 'daily_planning' the LAST step must always be 'synthesize_daily_plan' with no params — this renders the final answer to the user
-
+8. For create_issue, close_issue, create_pull_request — these are write operations,
+   set requires_confirmation=true and require an explicit repo + the specific
+   title/number/branch from the user's input. Never guess a repo if not specified —
+   use the active project's github_repo from context.
 Respond with ONLY a JSON array — no explanation, no markdown fences:
 [
   {{

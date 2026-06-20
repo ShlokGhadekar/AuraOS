@@ -35,7 +35,7 @@ cd "$PROJECT" || exit 1
 "$PYTHON" mcp_servers/memory_server.py &
 "$PYTHON" mcp_servers/calendar_server.py &
 "$PYTHON" mcp_servers/github_server.py &
-
+"$PYTHON" api/main.py &
 sleep 2
 
 echo "All servers started. Press Cmd+Shift+Space to activate AuraOS."
