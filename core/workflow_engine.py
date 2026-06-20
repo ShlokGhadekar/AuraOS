@@ -117,21 +117,24 @@ class WorkflowExecutor:
             tool_name = step.get("tool", "")
             raw_params = step.get("params", {})
             needs_confirm = step.get("requires_confirmation", False)
+            skip_if_missing = step.get("skip_if_missing", [])
 
-            # Resolve variables in params
+            # Skip step if required context vars are missing/empty
+            missing = [v for v in skip_if_missing if not self.context.get(v)]
+            if missing:
+                yield f"  [{i+1}/{len(steps)}] {step_name} — ⏭ skipped (missing: {', '.join(missing)})\n"
+                continue
+
             params = resolve_variables(raw_params, self.context)
-
             yield f"  [{i+1}/{len(steps)}] {step_name}\n"
 
             if needs_confirm:
                 yield f"  ⚠️  Requires confirmation — proceeding automatically in CLI mode\n"
 
-            # Execute via the tool executor
             result = self.executor._execute_tool(tool_name, params)
 
             if result and result.success:
                 yield f"  ✓ {result.message or step_name} \n"
-                # Store result in context for subsequent steps
                 if result.output and isinstance(result.output, dict):
                     self.context.update(result.output)
             else:

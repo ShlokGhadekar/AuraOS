@@ -44,12 +44,10 @@ class Agent:
         workflow = match_workflow(user_input)
         if workflow or intent.get("intent") in ("run_workflow", "dsa_session", "project_kickoff"):
             if not workflow:
-                # Try matching by intent name
                 from core.workflow_engine import load_workflow
                 intent_to_workflow = {
                     "dsa_session":     "dsa_session",
                     "project_kickoff": "project_kickoff",
-                    "run_workflow":    None,
                 }
                 wf_id = intent_to_workflow.get(intent.get("intent"))
                 if wf_id:
@@ -61,7 +59,12 @@ class Agent:
         if workflow:
             yield f"   Workflow: {workflow['name']}\n"
 
-            # Build session
+            # Resolve project context even for workflows, using the project_hint
+            project_hint = intent.get("project_hint")
+            if project_hint and not wm.active_project_id:
+                project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
+                wm.set_project(project_id)
+
             session = self.mem.start_session(
                 raw_input=user_input,
                 project_id=wm.active_project_id,
@@ -69,7 +72,6 @@ class Agent:
             )
             wm.session_id = session.id
 
-            # Build context
             agent_ctx = {
                 "active_project_id":   wm.active_project_id or "",
                 "active_project_path": "",
@@ -81,14 +83,13 @@ class Agent:
 
             wf_context = build_workflow_context(workflow, user_input, agent_ctx)
 
-            # Execute workflow
             from core.executor import Executor
             executor = Executor(session.id, wm, self.mem)
             wf_executor = WorkflowExecutor(workflow, wf_context, executor)
             yield from wf_executor.run()
 
             self.mem.end_session(session.id, status="completed")
-            return   # Skip normal plan/execute flow    
+            return 
 
         # ── Stage 2: Load context ──────────────────────────────
         context = {}

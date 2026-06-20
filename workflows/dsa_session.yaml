@@ -14,7 +14,7 @@ variables:
 
 steps:
   - name: Open LeetCode
-    tool: browser_open_url
+    tool: open_url
     params:
       url: "https://leetcode.com/problemset/"
 
@@ -35,9 +35,3 @@ steps:
     params:
       title: "DSA Session Started"
       message: "Focus time: {duration_minutes} minutes. Good luck!"
-
-  - name: Log session start
-    tool: log_workflow_run
-    params:
-      workflow_id: dsa_session
-      notes: "Started {duration_minutes} min DSA session"

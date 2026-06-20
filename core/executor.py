@@ -41,6 +41,7 @@ MCP_TO_LOCAL = {
     "git_status":            "git_status",
     "git_commit":            "git_commit",
     "git_init_and_push":     "git_init_and_push",
+    "open_url": "open_url",
 }
 
 TOOL_DISPLAY = {

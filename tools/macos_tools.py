@@ -419,6 +419,24 @@ class SetDoNotDisturb(AuraTool):
             message=f"DND toggle attempted (manual toggle may be needed)",
             metadata={"manual_required": True},
         )
+class OpenURL(AuraTool):
+    name = "open_url"
+    description = "Open a URL in the default web browser."
+    parameters_schema = {
+        "type": "object",
+        "properties": {
+            "url": {"type": "string", "description": "Full URL to open"}
+        },
+        "required": ["url"],
+    }
+    is_reversible = False
+    category = "macos"
+
+    def execute(self, url: str) -> ToolResult:
+        code, _, err = _run(["open", url])
+        if code == 0:
+            return self.ok(message=f"Opened {url}", output={"url": url})
+        return self.fail(error=f"Failed to open URL: {err}")
     
 MACOS_TOOLS: list[AuraTool] = [
 OpenApp(),
@@ -427,6 +445,7 @@ OpenVSCodeWorkspace(),
 SendNotification(),
 QuitApps(),
 SetDoNotDisturb(),
+OpenURL(),
 ]
 
 MACOS_TOOLS_BY_NAME: dict[str, AuraTool] = {t.name: t for t in MACOS_TOOLS}

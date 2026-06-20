@@ -155,8 +155,7 @@ class EpisodicMemory:
         self._conn: sqlite3.Connection = sqlite3.connect(
             self.db_path,
             check_same_thread=False,
-            detect_types=sqlite3.PARSE_DECLTYPES,
-            timeout=30
+            detect_types=sqlite3.PARSE_DECLTYPES
         )
         self._conn.row_factory = sqlite3.Row
         self._apply_schema()
@@ -171,8 +170,16 @@ class EpisodicMemory:
 
     # ── internal ──────────────────────────────────────────────
 
-    def _exec(self, sql: str, params: tuple = ()) -> sqlite3.Cursor:
-        return self._conn.execute(sql, params)
+    def _exec(self, sql: str, params: tuple = (), retries: int = 3) -> sqlite3.Cursor:
+        import time as _time
+        for attempt in range(retries):
+            try:
+                return self._conn.execute(sql, params)
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < retries - 1:
+                    _time.sleep(0.1 * (attempt + 1))
+                    continue
+                raise
 
     def _commit(self):
         self._conn.commit()
