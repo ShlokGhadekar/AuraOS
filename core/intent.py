@@ -34,12 +34,18 @@ even when the input is also a workflow trigger. Examples:
   "focus mode for fake news project" → intent: run_workflow, project_hint: "fake news"
   "start dsa session" → intent: dsa_session, project_hint: null (no project mentioned)
   "continue my auraos project" → intent: continue_project, project_hint: "auraos"
+  "create a new project called task-tracker" → intent: project_kickoff, project_hint: "task-tracker"
+  "new python project named weather-app" → intent: project_kickoff, project_hint: "weather-app"
+
+For project_kickoff intent, also extract project_type if mentioned (python, node, or react).
+Default to "python" if not specified.
 
 Respond with ONLY a JSON object — no explanation, no markdown fences:
 {{
   "intent": "<intent_key>",
   "confidence": <0.0-1.0>,
   "project_hint": "<project name if mentioned anywhere in the input, else null>",
+  "project_type": "<python|node|react, only for project_kickoff intent, else null>",
   "reasoning": "<one sentence>"
 }}""".format(intents="\n".join(f"- {k}: {v}" for k, v in INTENTS.items()))
 

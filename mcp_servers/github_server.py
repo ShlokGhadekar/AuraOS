@@ -141,6 +141,52 @@ def get_repo_info(req: ToolRequest):
         "pushed_at": data["pushed_at"], "url": data["html_url"],
     }}
 
+@app.post("/tools/create_github_repo")
+def create_github_repo(req: ToolRequest):
+    p = req.params
+    name = p.get("name")
+    private = p.get("private", False)
+    description = p.get("description", "")
+
+    if not settings.github_token:
+        return {"success": False, "error": "GITHUB_TOKEN not set in .env"}
+
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    body = json.dumps({
+        "name": name,
+        "private": private,
+        "description": description,
+        "auto_init": False,
+    }).encode()
+
+    req_obj = urllib.request.Request(
+        f"{BASE}/user/repos",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {settings.github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req_obj, timeout=15, context=ctx) as resp:
+            data = json.loads(resp.read())
+            return {
+                "success": True,
+                "output": {
+                    "full_name": data["full_name"],
+                    "clone_url": data["clone_url"],
+                    "ssh_url": data["ssh_url"],
+                    "html_url": data["html_url"],
+                },
+            }
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode() if e.fp else str(e)
+        return {"success": False, "error": f"GitHub API error {e.code}: {error_body}"}
+    except urllib.error.URLError as e:
+        return {"success": False, "error": f"Network error: {e.reason}"}
 
 if __name__ == "__main__":
     print(f"[github-server] starting on port {settings.port_github}")

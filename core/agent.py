@@ -67,7 +67,7 @@ class Agent:
             yield f"   Workflow: {workflow['name']}\n"
 
             project_hint = intent.get("project_hint")
-            if project_hint and not wm.active_project_id:
+            if project_hint and not wm.active_project_id and intent.get("intent") != "project_kickoff":
                 project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
                 wm.set_project(project_id)
 
@@ -79,9 +79,11 @@ class Agent:
             agent_ctx = {
                 "active_project_id":   wm.active_project_id or "",
                 "active_project_path": "",
+                "project_name":        project_hint or "",
+                "project_type":        intent.get("project_type") or "python",
             }
             if wm.active_project_id:
-                project = self.mem.get_project(wm.active_project_id)  # read, safe
+                project = self.mem.get_project(wm.active_project_id)
                 if project:
                     agent_ctx["active_project_path"] = project.path
 
@@ -97,9 +99,7 @@ class Agent:
         # ── Stage 2: Load context ──────────────────────────────
         context = {}
         project_hint = intent.get("project_hint")
-
-        if project_hint:
-            yield f"   Project hint: {project_hint}\n"
+        if project_hint and not wm.active_project_id and intent.get("intent") != "project_kickoff":
             project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
             wm.set_project(project_id)
 

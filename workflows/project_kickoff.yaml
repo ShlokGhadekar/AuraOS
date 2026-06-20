@@ -5,25 +5,14 @@ triggers:
   - "new project"
   - "kickoff project"
   - "start new project"
-  - "create project"
-
-variables:
-  - name: project_name
-    default: null
-    prompt: "Project name?"
-  - name: project_type
-    default: python
-    prompt: "Type? (python/node/react)"
-  - name: private
-    default: false
-    prompt: "Private repo? (yes/no)"
+  - "create a new project"
 
 steps:
   - name: Create GitHub repo
-    tool: github_create_repo
+    tool: create_github_repo
     params:
       name: "{project_name}"
-      private: "{private}"
+      private: false
       description: "Created via AuraOS"
 
   - name: Create local directory
@@ -31,25 +20,27 @@ steps:
     params:
       path: "~/Documents/Projects and stuff/{project_name}"
 
-  - name: Scaffold project
+  - name: Scaffold project files
     tool: scaffold_project
     params:
       path: "~/Documents/Projects and stuff/{project_name}"
       type: "{project_type}"
+      name: "{project_name}"
+      description: "Created via AuraOS"
 
-  - name: Git init and push
+  - name: Push to GitHub
     tool: git_init_and_push
     params:
       path: "~/Documents/Projects and stuff/{project_name}"
-      remote: "{github_repo_url}"
+      remote: "{clone_url}"
 
   - name: Register in AuraOS
     tool: register_project
     params:
-      id: "{project_name_slug}"
+      id: "{project_name}"
       name: "{project_name}"
       path: "~/Documents/Projects and stuff/{project_name}"
-      github_repo: "{github_full_name}"
+      github_repo: "{full_name}"
 
   - name: Open in VS Code
     tool: open_vscode_workspace

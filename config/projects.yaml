@@ -1,14 +1,20 @@
 projects:
-  - id: auraos
-    name: AuraOS
-    path: ~/Documents/Projects and stuff/auraos
-    description: AI-powered personal computing environment. Python, FastAPI, MCP.
-    github_repo: ShlokGhadekar/AuraOS
-    tags: [python, ai, fastapi]
+- id: auraos
+  name: AuraOS
+  path: ~/Documents/Projects and stuff/auraos
+  description: AI-powered personal computing environment. Python, FastAPI, MCP.
+  github_repo: ShlokGhadekar/AuraOS
+  tags:
+  - python
+  - ai
+  - fastapi
+- id: fake-news
+  name: Fake News Detection
+  path: ~/Documents/fake-news
+  description: ML classifier for misinformation detection using NLP and BERT.
+  github_repo: ShlokGhadekar/Fake_news_detection
+  tags:
+  - python
+  - ml
+  - nlp
 
-  - id: fake-news
-    name: Fake News Detection
-    path: ~/Documents/fake-news
-    description: ML classifier for misinformation detection using NLP and BERT.
-    github_repo: ShlokGhadekar/Fake_news_detection
-    tags: [python, ml, nlp]
