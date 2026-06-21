@@ -35,6 +35,12 @@ TOOL_ROUTING = {
     "create_issue":         settings.port_github,
     "close_issue":          settings.port_github,
     "create_pull_request":  settings.port_github,
+    "open_url":         settings.port_browser,
+    "search_web":       settings.port_browser,
+    "fill_form":        settings.port_browser,
+    "click_element":    settings.port_browser,
+    "get_page_text":    settings.port_browser,
+    "close_browser":    settings.port_browser,
 
     # Calendar server (8104)
     "get_today_events":         settings.port_calendar,

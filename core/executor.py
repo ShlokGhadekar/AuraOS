@@ -35,7 +35,6 @@ MCP_TO_LOCAL = {
     "list_projects":         "list_projects",
     "quit_apps":             "quit_apps",
     "set_do_not_disturb":    "set_do_not_disturb",
-    "open_url":              "open_url",
     "git_status":            "git_status",
     "git_commit":            "git_commit",
     "git_init_and_push":     "git_init_and_push",

@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Any
+
 from dataclasses import asdict
 
 from memory.episodic import EpisodicMemory
@@ -170,6 +171,7 @@ if __name__ == "__main__":
     print(f"[memory-server] starting on port {settings.port_memory}")
     uvicorn.run(app, host="127.0.0.1", port=settings.port_memory, log_level="warning")
 
+@app.post("/tools/upsert_project")
 @app.post("/tools/upsert_project")
 def upsert_project(req: ToolRequest):
     p = req.params

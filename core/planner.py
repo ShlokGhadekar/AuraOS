@@ -37,7 +37,17 @@ GITHUB TOOLS:
 - create_issue(repo, title, body="", labels=[]) → create a new issue
 - close_issue(repo, number) → close an issue by number
 - create_pull_request(repo, title, head, base="main", body="") → open a PR
+
+BROWSER TOOLS:
+- open_url(url, new_tab=false) → open a URL in a controlled browser
+- search_web(query, engine="google") → search google/leetcode/github/stackoverflow
+- fill_form(fields={selector: value}, submit_selector=None) → fill and optionally submit a form
+- get_page_text() → read visible text from the current page
+- click_element(selector) → click an element
+- close_browser() → close the browser window
 """
+
+
 
 SYSTEM = """You are the task planner for AuraOS, an AI-powered personal computing environment on macOS.
 
@@ -58,6 +68,7 @@ Rules:
    set requires_confirmation=true and require an explicit repo + the specific
    title/number/branch from the user's input. Never guess a repo if not specified —
    use the active project's github_repo from context.
+9. For 'browser_query' intent, the plan should be a single step: get_page_text with no params.
 Respond with ONLY a JSON array — no explanation, no markdown fences:
 [
   {{

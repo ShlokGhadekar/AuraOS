@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     port_calendar: int = 8104
     port_github: int = 8105
     port_core: int = 8100
+    port_browser: int = 8106
 
     class Config:
         env_file = ".env"
