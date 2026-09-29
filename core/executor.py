@@ -43,6 +43,38 @@ MCP_TO_LOCAL = {
     "register_project":   "register_project",
 }
 
+# Tools with both a local and an MCP implementation where the MCP one must win.
+# open_url has to go to the Playwright browser server so that follow-up steps
+# (get_page_text, click_element, fill_form) act on the page it opened; the local
+# default-browser tool is only a fallback for when that server is offline.
+PREFER_MCP = {"open_url"}
+
+# Word the user adds to a command to approve steps marked requires_confirmation,
+# e.g. "wrap up auraos confirm". Without it those steps are skipped.
+CONFIRM_WORDS = {"confirm", "confirmed", "--yes"}
+
+# MCP write tools that always need confirmation in LLM-planned steps, even if
+# the planner forgot to flag them (local tools use their own class attribute).
+MCP_CONFIRM_REQUIRED = {"create_issue", "close_issue", "create_pull_request", "create_github_repo"}
+
+
+def split_confirmation(user_input: str) -> tuple[str, bool]:
+    """Strip confirmation words from the input. Returns (clean_input, confirmed)."""
+    words = user_input.split()
+    kept = [w for w in words if w.lower().strip(".,!") not in CONFIRM_WORDS]
+    return " ".join(kept), len(kept) != len(words)
+
+
+def skipped_for_confirmation(tool_name: str):
+    from tools.base import ToolResult
+    return ToolResult(
+        success=True,
+        tool_name=tool_name,
+        message=f"⏸  {tool_name} skipped — needs confirmation (add 'confirm' to your command to run it)",
+        metadata={"needs_confirmation": True},
+    )
+
+
 TOOL_DISPLAY = {
     "detect_project":          "🔍 Detecting project",
     "list_recent_files":       "📂 Reading recent files",
@@ -85,10 +117,12 @@ class Executor:
         session_id: str,
         wm: WorkingMemory,
         mem: EpisodicMemory,
+        confirmed: bool = False,
     ):
         self.session_id = session_id
         self.wm = wm
         self.mem = mem  # kept for reads only — writes go through MCP
+        self.confirmed = confirmed  # user approved requires_confirmation steps
 
     def run(self, plan: list[dict]) -> Generator[str, None, None]:
         """
@@ -98,16 +132,26 @@ class Executor:
         yield "\n"
 
         for i, step in enumerate(plan):
-            tool_name = step.get("tool", "")
-            params    = step.get("params", {})
-            needs_confirm = step.get("requires_confirmation", False)
+            tool_name     = step.get("tool", "")
+            params        = step.get("params") or {}
+            local_tool    = ALL_TOOLS.get(MCP_TO_LOCAL.get(tool_name, tool_name))
+            needs_confirm = (
+                step.get("requires_confirmation", False)
+                or tool_name in MCP_CONFIRM_REQUIRED
+                or bool(local_tool and local_tool.requires_confirmation)
+            )
 
             display = TOOL_DISPLAY.get(tool_name, f"⚙️  {tool_name}")
             yield f"{display}...\n"
 
+            if needs_confirm and not self.confirmed:
+                self.wm.mark_step_failed(i, error="skipped: needs confirmation")
+                yield f"  {skipped_for_confirmation(tool_name).message}\n"
+                if step.get("reason"):
+                    yield f"     → {step['reason']}\n"
+                continue
             if needs_confirm:
-                yield f"  ⚠️  This step requires confirmation: {step.get('reason', '')}\n"
-                yield "  Proceeding automatically in CLI mode.\n"
+                yield "  ⚠️  Confirmed — running.\n"
 
             # Log to memory via MCP (avoids direct SQLite write contention)
             call_id = self._log_tool_call(tool_name, params)
@@ -191,25 +235,37 @@ class Executor:
         if tool_name == "synthesize_daily_plan":
             return self._synthesize_daily_plan()
 
-        # Try local tool first
+        params = params or {}
         local_name = MCP_TO_LOCAL.get(tool_name, tool_name)
         tool = ALL_TOOLS.get(local_name)
-        if tool:
-            try:
-                return tool.timed_execute(**params)
-            except TypeError as e:
-                return ToolResult(success=False, tool_name=tool_name,
-                                  error=f"Invalid parameters: {e}")
 
-        # Fall through to MCP client
+        if tool_name in PREFER_MCP:
+            result = self._execute_mcp(tool_name, params)
+            if not result.metadata.get("server_offline"):
+                return result
+            # Local tools don't accept MCP-only params like new_tab
+            accepted = tool.parameters_schema.get("properties", {})
+            params = {k: v for k, v in params.items() if k in accepted}
+        elif not tool:
+            return self._execute_mcp(tool_name, params)
+
         try:
-            from core.mcp_client import call_mcp_tool
+            return tool.timed_execute(**params)
+        except TypeError as e:
+            return ToolResult(success=False, tool_name=tool_name,
+                              error=f"Invalid parameters: {e}")
+
+    def _execute_mcp(self, tool_name: str, params: dict):
+        from tools.base import ToolResult
+        from core.mcp_client import call_mcp_tool
+
+        try:
             data = call_mcp_tool(tool_name, params)
             return ToolResult(
                 success=data.get("success", False),
                 tool_name=tool_name,
                 output=data.get("output"),
-                message=data.get("message", f"{tool_name} completed"),
+                message=data.get("message") or f"{tool_name} completed",
                 error=data.get("error", ""),
             )
         except ConnectionError:
@@ -218,6 +274,7 @@ class Executor:
                 tool_name=tool_name,
                 message=f"⏭  {tool_name} skipped (server offline)",
                 output=None,
+                metadata={"server_offline": True},
             )
         except Exception as e:
             return ToolResult(success=False, tool_name=tool_name, error=str(e))

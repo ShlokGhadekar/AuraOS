@@ -88,11 +88,18 @@ class GitInitAndPush(AuraTool):
     category = "git"
 
     def execute(self, path: str, remote: str) -> ToolResult:
-        for args in [["init"], ["add", "-A"], ["commit", "-m", "Initial commit"]]:
-            code, _, err = _git(args, path)
-            if code != 0 and "nothing to commit" not in err:
-                return self.fail(error=f"git {args[0]} failed: {err}")
+        # branch -M: `git init` names the branch after init.defaultBranch,
+        # which may be "master" — pushing "main" would then fail.
+        for args in [["init"], ["add", "-A"], ["commit", "-m", "Initial commit"], ["branch", "-M", "main"]]:
+            code, out, err = _git(args, path)
+            if code != 0 and "nothing to commit" not in out + err:
+                return self.fail(error=f"git {args[0]} failed: {err or out}")
+        # Re-running kickoff: remote may already exist, so fall back to set-url
         code, _, err = _git(["remote", "add", "origin", remote], path)
+        if code != 0:
+            code, _, err = _git(["remote", "set-url", "origin", remote], path)
+            if code != 0:
+                return self.fail(error=f"git remote failed: {err}")
         code, _, err = _git(["push", "-u", "origin", "main"], path)
         if code != 0:
             return self.fail(error=f"git push failed: {err}")

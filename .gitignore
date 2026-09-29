@@ -1,6 +1,11 @@
 .env
 data/
 .venv/
+nvenv/
 __pycache__/
-*.pycelectron-overlay/node_modules/
+*.pyc
+electron-overlay/node_modules/
 *.node
+.DS_Store
+.pytest_cache/
+config/.projects_yaml.hash

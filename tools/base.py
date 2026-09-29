@@ -74,7 +74,7 @@ class AuraTool(ABC):
     description: str = ""
 
     #: JSON Schema for parameters — validated before execute() is called
-    parameters_schema: dict = field(default_factory=dict)
+    parameters_schema: dict = {}
 
     # ── Optional class attributes ──────────────────────────────
 

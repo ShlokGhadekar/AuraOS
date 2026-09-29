@@ -12,6 +12,7 @@ import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Any
+from urllib.parse import quote_plus
 from playwright.async_api import async_playwright
 
 from config.settings import settings
@@ -108,11 +109,12 @@ async def search_web(req: ToolRequest):
     if not query:
         return {"success": False, "error": "query is required"}
 
+    q = quote_plus(query)  # "c++ & templates" must not break the query string
     search_urls = {
-        "google": f"https://www.google.com/search?q={query}",
-        "leetcode": f"https://leetcode.com/problemset/?search={query}",
-        "github": f"https://github.com/search?q={query}",
-        "stackoverflow": f"https://stackoverflow.com/search?q={query}",
+        "google": f"https://www.google.com/search?q={q}",
+        "leetcode": f"https://leetcode.com/problemset/?search={q}",
+        "github": f"https://github.com/search?q={q}",
+        "stackoverflow": f"https://stackoverflow.com/search?q={q}",
     }
     url = search_urls.get(engine, search_urls["google"])
 

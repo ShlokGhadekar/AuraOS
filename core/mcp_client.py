@@ -82,8 +82,16 @@ def call_mcp_tool(tool_name: str, params: dict = None) -> dict:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:  # > browser goto (15s) and GitHub write (15s) timeouts
             return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        # Server is up but the call failed (404 = missing route, 500 = crash).
+        # HTTPError subclasses URLError, so it must be caught first or it
+        # would be misreported as "server offline" and silently skipped.
+        detail = e.read().decode(errors="replace")[:500] if e.fp else e.reason
+        raise RuntimeError(
+            f"MCP tool '{tool_name}' failed on port {port} (HTTP {e.code}): {detail}"
+        ) from e
     except urllib.error.URLError as e:
         raise ConnectionError(
             f"MCP server on port {port} unreachable for tool '{tool_name}'. "
@@ -108,6 +116,7 @@ def server_status() -> dict:
         "memory":     is_server_running(settings.port_memory),
         "calendar":   is_server_running(settings.port_calendar),
         "github":     is_server_running(settings.port_github),
+        "browser":    is_server_running(settings.port_browser),
     }
 
 def mcp_start_session(raw_input: str, project_id: str = None, intent: str = None) -> dict:

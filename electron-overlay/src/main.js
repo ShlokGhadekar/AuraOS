@@ -76,6 +76,35 @@ ipcMain.on('refocus-overlay', () => {
   if (overlayWindow) overlayWindow.focus();
 });
 
+// Agent calls run here in the main process rather than the renderer, so the
+// core API doesn't need permissive CORS (which would let any website the
+// user visits drive the agent via localhost).
+ipcMain.on('run-command', async (event, id, text) => {
+  const send = (channel, ...args) => {
+    if (!event.sender.isDestroyed()) event.sender.send(channel, id, ...args);
+  };
+  try {
+    const response = await fetch('http://127.0.0.1:8100/api/v1/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: text }),
+    });
+
+    if (!response.ok || !response.body) {
+      send('run-error', `Server error: ${response.status}`);
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    for await (const chunk of response.body) {
+      send('run-token', decoder.decode(chunk, { stream: true }));
+    }
+    send('run-done');
+  } catch (err) {
+    send('run-error', err.message || 'Connection failed. Is AuraOS running?');
+  }
+});
+
 ipcMain.on('resize-overlay', (event, height) => {
   if (overlayWindow) {
     const [width] = overlayWindow.getSize();

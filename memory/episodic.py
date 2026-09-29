@@ -160,10 +160,21 @@ class EpisodicMemory:
         self._conn.row_factory = sqlite3.Row
         self._apply_schema()
 
-    def _apply_schema(self):
+    def _apply_schema(self, retries: int = 8):
+        # Servers start concurrently and each applies the schema; switching to
+        # WAL needs an exclusive lock that ignores the busy timeout, so retry.
+        import time as _time
         schema = self.SCHEMA_PATH.read_text()
-        self._conn.executescript(schema)
-        self._conn.commit()
+        for attempt in range(retries):
+            try:
+                self._conn.executescript(schema)
+                self._conn.commit()
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e) and attempt < retries - 1:
+                    _time.sleep(0.05 * (2 ** attempt))
+                    continue
+                raise
 
     def close(self):
         self._conn.close()
@@ -291,6 +302,29 @@ class EpisodicMemory:
         """, (status, now, duration_ms, error, session_id))
         self._commit()
         return self.get_session(session_id)
+
+    def abort_stale_sessions(self, max_age_minutes: int = 60) -> int:
+        """
+        Mark sessions stuck in 'running' for longer than max_age_minutes as
+        aborted — left behind when a process was killed mid-run.
+        Returns the number of sessions updated.
+        """
+        cutoff = datetime.now(timezone.utc).timestamp() - max_age_minutes * 60
+        stale = [
+            s for s in (
+                self._row_to_session(r) for r in self._exec(
+                    "SELECT * FROM sessions WHERE status = 'running'"
+                ).fetchall()
+            )
+            if datetime.fromisoformat(s.started_at).timestamp() < cutoff
+        ]
+        for s in stale:
+            self._exec("""
+                UPDATE sessions SET status = 'aborted', ended_at = ?, error = ?
+                WHERE id = ?
+            """, (_now(), "stale: process exited before session was closed", s.id))
+        self._commit()
+        return len(stale)
 
     def update_session_plan(self, session_id: str, plan: list[dict]):
         self._exec(

@@ -167,11 +167,8 @@ def update_session_plan(req: ToolRequest):
 def touch_project(req: ToolRequest):
     mem.touch_project(req.params.get("project_id"))
     return {"success": True}
-if __name__ == "__main__":
-    print(f"[memory-server] starting on port {settings.port_memory}")
-    uvicorn.run(app, host="127.0.0.1", port=settings.port_memory, log_level="warning")
 
-@app.post("/tools/upsert_project")
+
 @app.post("/tools/upsert_project")
 def upsert_project(req: ToolRequest):
     p = req.params
@@ -181,3 +178,12 @@ def upsert_project(req: ToolRequest):
         tags=p.get("tags", []),
     )
     return {"success": True, "output": asdict(project)}
+
+
+if __name__ == "__main__":
+    stale = mem.abort_stale_sessions()
+    if stale:
+        print(f"[memory-server] marked {stale} stale running session(s) as aborted")
+    print(f"[memory-server] starting on port {settings.port_memory}")
+    uvicorn.run(app, host="127.0.0.1", port=settings.port_memory, log_level="warning")
+

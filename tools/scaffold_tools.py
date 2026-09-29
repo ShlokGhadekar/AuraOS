@@ -129,22 +129,32 @@ class RegisterProject(AuraTool):
             with open(yaml_path) as f:
                 data = yaml.safe_load(f) or {"projects": []}
 
-        # Avoid duplicate entries
-        existing_ids = {p["id"] for p in data["projects"]}
-        if id in existing_ids:
-            return self.ok(message=f"Project '{id}' already registered")
-
-        data["projects"].append({
+        entry = {
             "id": id,
             "name": name,
             "path": path,
             "description": description,
             "github_repo": github_repo,
             "tags": [],
-        })
+        }
+
+        # Avoid duplicate entries
+        existing_ids = {p["id"] for p in data["projects"]}
+        if id in existing_ids:
+            return self.ok(message=f"Project '{id}' already registered")
+
+        data["projects"].append(entry)
 
         with open(yaml_path, "w") as f:
             yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+
+        # Also register in the DB now, so "continue my <project>" works without
+        # restarting servers (otherwise the agent auto-creates it with a guessed path)
+        try:
+            from core.mcp_client import call_mcp_tool
+            call_mcp_tool("upsert_project", entry)
+        except Exception:
+            pass  # YAML is the source of truth; filesystem server syncs it on startup
 
         return self.ok(
             message=f"Registered project '{id}' in projects.yaml",

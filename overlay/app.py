@@ -21,7 +21,7 @@ from textual import work
 from core.agent import Agent
 
 
-BANNER = "⚡ AuraOS  ·  Cmd+Enter to run  ·  Esc to close"
+BANNER = "⚡ AuraOS  ·  Enter to run  ·  Esc to close"
 
 
 class AuraOverlay(App):

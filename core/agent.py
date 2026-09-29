@@ -16,11 +16,12 @@ import certifi
 ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
 
 from collections.abc import Generator
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 from core.intent import classify_intent
 from core.planner import build_plan, format_plan_for_display
-from core.executor import Executor
+from core.executor import Executor, split_confirmation
 from core.summarizer import summarize_session
 from core.mcp_client import call_mcp_tool, mcp_start_session, mcp_end_session
 from memory.episodic import EpisodicMemory
@@ -35,6 +36,7 @@ class Agent:
         self.sem = SemanticMemory(settings.chroma_path)
 
     def run(self, user_input: str) -> Generator[str, None, None]:
+        user_input, confirmed = split_confirmation(user_input)
         wm = WorkingMemory()
         wm.raw_input = user_input
         wm.push_message("user", user_input)
@@ -67,9 +69,8 @@ class Agent:
             yield f"   Workflow: {workflow['name']}\n"
 
             project_hint = intent.get("project_hint")
-            if project_hint and not wm.active_project_id and intent.get("intent") != "project_kickoff":
-                project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
-                wm.set_project(project_id)
+            if project_hint and intent.get("intent") != "project_kickoff":
+                self._resolve_project(project_hint, wm)
 
             # Start session via MCP (no direct SQLite write)
             resp = mcp_start_session(user_input, wm.active_project_id, intent.get("intent"))
@@ -89,27 +90,17 @@ class Agent:
 
             wf_context = build_workflow_context(workflow, user_input, agent_ctx)
 
-            executor = Executor(session.id, wm, self.mem)
+            executor = Executor(session.id, wm, self.mem, confirmed=confirmed)
             wf_executor = WorkflowExecutor(workflow, wf_context, executor)
-            yield from wf_executor.run()
-
-            mcp_end_session(session.id, status="completed")
+            with _session_guard(session.id):
+                yield from wf_executor.run()
             return
 
         # ── Stage 2: Load context ──────────────────────────────
         context = {}
         project_hint = intent.get("project_hint")
-        if project_hint and not wm.active_project_id and intent.get("intent") != "project_kickoff":
-            project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
-            wm.set_project(project_id)
-
-            # Ensure project exists — this is a write, route through MCP
-            if not self.mem.get_project(project_id):
-                call_mcp_tool("upsert_project" , {
-                    "id": project_id,
-                    "name": project_hint or project_id,
-                    "path": str(Path.home() / "Documents" / project_id),
-                })
+        if project_hint and intent.get("intent") != "project_kickoff":
+            project_id = self._resolve_project(project_hint, wm)
 
             ctx = self.mem.get_project_context(project_id)  # read, safe
             if ctx.get("snapshot"):
@@ -139,54 +130,67 @@ class Agent:
         session = SimpleNamespace(**resp["output"])
         wm.session_id = session.id
 
-        call_mcp_tool("update_session_plan", {"session_id": session.id, "plan": plan})
+        with _session_guard(session.id):
+            call_mcp_tool("update_session_plan", {"session_id": session.id, "plan": plan})
 
-        if wm.active_project_id:
-            call_mcp_tool("touch_project", {"project_id": wm.active_project_id})
+            if wm.active_project_id:
+                call_mcp_tool("touch_project", {"project_id": wm.active_project_id})
 
-        # ── Stage 4: Show plan ─────────────────────────────────
-        yield "\n" + format_plan_for_display(plan) + "\n"
+            # ── Stage 4: Show plan ─────────────────────────────────
+            yield "\n" + format_plan_for_display(plan) + "\n"
 
-        # ── Stage 5: Surface loaded context ───────────────────
-        if wm.loaded_snapshot:
-            yield from self._render_snapshot(wm.loaded_snapshot)
+            # ── Stage 5: Surface loaded context ───────────────────
+            if wm.loaded_snapshot:
+                yield from self._render_snapshot(wm.loaded_snapshot)
 
-        if context.get("github"):
-            yield from self._render_github(context["github"])
+            if context.get("github"):
+                yield from self._render_github(context["github"])
 
-        yield "\n▶ Executing...\n"
+            yield "\n▶ Executing...\n"
 
-        # ── Stage 6: Execute ───────────────────────────────────
-        executor = Executor(session.id, wm, self.mem)
-        yield from executor.run(plan)
+            # ── Stage 6: Execute ───────────────────────────────────
+            executor = Executor(session.id, wm, self.mem, confirmed=confirmed)
+            yield from executor.run(plan)
 
-        # ── Stage 7: Summarize ─────────────────────────────────
-        yield "\n💾 Saving session...\n"
-        try:
-            summary = summarize_session(wm)
-            if summary and wm.active_project_id:
-                # save_context_snapshot via MCP (write)
-                call_mcp_tool("save_context_snapshot", {
-                    "project_id": wm.active_project_id,
-                    "session_id": session.id,
-                    **summary,
-                })
-                if summary.get("summary"):
-                    self.sem.upsert_snapshot(
-                        session.id,
-                        f"{wm.active_project_id}: {summary['summary']}",
-                        metadata={"project_id": wm.active_project_id},
-                    )
-                    self.sem.upsert_project(
-                        wm.active_project_id,
-                        f"{wm.active_project_id}: {summary['summary']}",
-                        metadata={"project_id": wm.active_project_id},
-                    )
-            mcp_end_session(session.id, status="completed")
-            yield "✓ Session saved.\n"
-        except Exception as e:
-            mcp_end_session(session.id, status="failed", error=str(e))
-            yield f"⚠ Could not save session: {e}\n"
+            # ── Stage 7: Summarize ─────────────────────────────────
+            yield "\n💾 Saving session...\n"
+            try:
+                summary = summarize_session(wm)
+                if summary and wm.active_project_id:
+                    # save_context_snapshot via MCP (write) — the memory server
+                    # also indexes the snapshot summary in semantic memory
+                    call_mcp_tool("save_context_snapshot", {
+                        "project_id": wm.active_project_id,
+                        "session_id": session.id,
+                        **summary,
+                    })
+                    if summary.get("summary"):
+                        self.sem.upsert_project(
+                            wm.active_project_id,
+                            f"{wm.active_project_id}: {summary['summary']}",
+                            metadata={"project_id": wm.active_project_id},
+                        )
+                yield "✓ Session saved.\n"
+            except Exception as e:
+                yield f"⚠ Could not save session: {e}\n"
+
+    def _resolve_project(self, project_hint: str, wm: WorkingMemory) -> str:
+        """
+        Map a project hint to a project_id, set it on working memory, and make
+        sure the project row exists — sessions and snapshots have a foreign key
+        to projects, so an unknown id would fail the session insert.
+        """
+        project_id = self.sem.identify_project(project_hint) or _slugify(project_hint)
+        wm.set_project(project_id)
+
+        # Ensure project exists — this is a write, route through MCP
+        if not self.mem.get_project(project_id):
+            call_mcp_tool("upsert_project", {
+                "id": project_id,
+                "name": project_hint or project_id,
+                "path": str(Path.home() / "Documents" / project_id),
+            })
+        return project_id
 
     def _load_github_context(self, repo: str) -> dict:
         try:
@@ -230,6 +234,32 @@ class Agent:
 
     def close(self):
         self.mem.close()
+
+
+@contextmanager
+def _session_guard(session_id: str):
+    """
+    Mark the session completed on normal exit, failed on error, and aborted
+    if the consumer stops iterating (e.g. the overlay client disconnects).
+    Without this, any exception leaves the session stuck as 'running'.
+    """
+    try:
+        yield
+    except GeneratorExit:
+        _safe_end_session(session_id, "aborted", "client disconnected")
+        raise
+    except Exception as e:
+        _safe_end_session(session_id, "failed", str(e))
+        raise
+    else:
+        _safe_end_session(session_id, "completed")
+
+
+def _safe_end_session(session_id: str, status: str, error: str = None):
+    try:
+        mcp_end_session(session_id, status=status, error=error)
+    except Exception:
+        pass  # never mask the original error with a logging failure
 
 
 def _slugify(text: str) -> str:

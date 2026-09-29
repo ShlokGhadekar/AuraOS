@@ -8,30 +8,23 @@ contextBridge.exposeInMainWorld('aura', {
   dismiss: () => ipcRenderer.send('dismiss-overlay'),
   resize: (height) => ipcRenderer.send('resize-overlay', height),
 
-  runCommand: async (text, onToken, onDone, onError) => {
-    try {
-      const response = await fetch('http://localhost:8100/api/v1/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input: text }),
-      });
-
-      if (!response.ok || !response.body) {
-        onError(`Server error: ${response.status}`);
-        return;
+  runCommand: (text, onToken, onDone, onError) => {
+    // Main process does the HTTP call and streams chunks back over IPC
+    const id = `${Date.now()}-${Math.random()}`;
+    const handlers = {
+      'run-token': (_e, runId, chunk) => runId === id && onToken(chunk),
+      'run-done':  (_e, runId) => runId === id && finish(onDone),
+      'run-error': (_e, runId, message) => runId === id && finish(onError, message),
+    };
+    function finish(callback, ...args) {
+      for (const [channel, handler] of Object.entries(handlers)) {
+        ipcRenderer.removeListener(channel, handler);
       }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        onToken(decoder.decode(value, { stream: true }));
-      }
-      onDone();
-    } catch (err) {
-      onError(err.message || 'Connection failed. Is AuraOS running?');
+      callback(...args);
     }
+    for (const [channel, handler] of Object.entries(handlers)) {
+      ipcRenderer.on(channel, handler);
+    }
+    ipcRenderer.send('run-command', id, text);
   },
 });

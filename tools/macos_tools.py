@@ -46,6 +46,11 @@ def _osascript(script: str) -> tuple[int, str, str]:
     return _run(["osascript", "-e", script])
 
 
+def _applescript_str(value: str) -> str:
+    """Quote a value as an AppleScript string literal (escapes \\ and ")."""
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _expand(path: str) -> Path:
     return Path(path).expanduser().resolve()
 
@@ -321,11 +326,11 @@ class SendNotification(AuraTool):
     category = "macos"
 
     def execute(self, title: str, message: str, subtitle: str = "") -> ToolResult:
-        subtitle_part = f'subtitle "{subtitle}"' if subtitle else ""
+        subtitle_part = f"subtitle {_applescript_str(subtitle)}" if subtitle else ""
         script = (
-            f'display notification "{message}" '
-            f'with title "{title}" '
-            f'{subtitle_part}'
+            f"display notification {_applescript_str(message)} "
+            f"with title {_applescript_str(title)} "
+            f"{subtitle_part}"
         ).strip()
 
         code, _, err = _osascript(script)
@@ -336,19 +341,6 @@ class SendNotification(AuraTool):
             )
         return self.fail(error=f"Notification failed: {err}")
 
-
-# ─────────────────────────────────────────────────────────────
-# Registry — all macOS tools in one place
-# ─────────────────────────────────────────────────────────────
-
-MACOS_TOOLS: list[AuraTool] = [
-    OpenApp(),
-    OpenFile(),
-    OpenVSCodeWorkspace(),
-    SendNotification(),
-]
-
-MACOS_TOOLS_BY_NAME: dict[str, AuraTool] = {t.name: t for t in MACOS_TOOLS}
 
 class QuitApps(AuraTool):
     name = "quit_apps"
@@ -370,7 +362,7 @@ class QuitApps(AuraTool):
     def execute(self, apps: list[str]) -> ToolResult:
         quit_results = []
         for app in apps:
-            script = f'tell application "{app}" to quit'
+            script = f"tell application {_applescript_str(app)} to quit"
             code, _, err = _osascript(script)
             quit_results.append({"app": app, "success": code == 0})
         succeeded = [r["app"] for r in quit_results if r["success"]]
@@ -397,17 +389,7 @@ class SetDoNotDisturb(AuraTool):
     category = "macos"
 
     def execute(self, enabled: bool) -> ToolResult:
-        # macOS Sonoma/Sequoia: toggle Focus via shortcuts
-        action = "on" if enabled else "off"
-        # Use osascript to toggle via System Events
-        script = f"""
-        tell application "System Events"
-            tell process "Control Center"
-                -- Focus mode toggle via menu bar
-            end tell
-        end tell
-        """
-        # Fallback: use shortcuts app if available
+        # macOS Sonoma/Sequoia: toggle Focus via user-created Shortcuts
         code, _, err = _run([
             "shortcuts", "run",
             "Enable Do Not Disturb" if enabled else "Disable Do Not Disturb"
@@ -419,6 +401,8 @@ class SetDoNotDisturb(AuraTool):
             message=f"DND toggle attempted (manual toggle may be needed)",
             metadata={"manual_required": True},
         )
+
+
 class OpenURL(AuraTool):
     name = "open_url"
     description = "Open a URL in the default web browser."
@@ -437,15 +421,20 @@ class OpenURL(AuraTool):
         if code == 0:
             return self.ok(message=f"Opened {url}", output={"url": url})
         return self.fail(error=f"Failed to open URL: {err}")
-    
+
+
+# ─────────────────────────────────────────────────────────────
+# Registry — all macOS tools in one place
+# ─────────────────────────────────────────────────────────────
+
 MACOS_TOOLS: list[AuraTool] = [
-OpenApp(),
-OpenFile(),
-OpenVSCodeWorkspace(),
-SendNotification(),
-QuitApps(),
-SetDoNotDisturb(),
-OpenURL(),
+    OpenApp(),
+    OpenFile(),
+    OpenVSCodeWorkspace(),
+    SendNotification(),
+    QuitApps(),
+    SetDoNotDisturb(),
+    OpenURL(),
 ]
 
 MACOS_TOOLS_BY_NAME: dict[str, AuraTool] = {t.name: t for t in MACOS_TOOLS}

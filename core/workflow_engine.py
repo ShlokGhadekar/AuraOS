@@ -128,8 +128,12 @@ class WorkflowExecutor:
             params = resolve_variables(raw_params, self.context)
             yield f"  [{i+1}/{len(steps)}] {step_name}\n"
 
+            if needs_confirm and not self.executor.confirmed:
+                from core.executor import skipped_for_confirmation
+                yield f"  {skipped_for_confirmation(tool_name).message}\n"
+                continue
             if needs_confirm:
-                yield f"  ⚠️  Requires confirmation — proceeding automatically in CLI mode\n"
+                yield "  ⚠️  Confirmed — running.\n"
 
             result = self.executor._execute_tool(tool_name, params)
 

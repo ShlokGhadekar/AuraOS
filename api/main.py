@@ -10,21 +10,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 
 from core.agent import Agent
 from config.settings import settings
 
+# No CORS middleware on purpose: the Electron overlay calls this from its main
+# process, and allowing browser origins would let any website run the agent.
 app = FastAPI(title="AuraOS Core API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 class RunRequest(BaseModel):
