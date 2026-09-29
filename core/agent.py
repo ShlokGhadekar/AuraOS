@@ -114,7 +114,9 @@ class Agent:
             if project and project.github_repo:
                 yield f"   GitHub: fetching context for {project.github_repo}...\n"
                 gh_context = self._load_github_context(project.github_repo)
-                if gh_context:
+                if gh_context.get("error"):
+                    yield f"   GitHub: unavailable — {gh_context['error']}\n"
+                elif gh_context:
                     context["github"] = gh_context
                     issues_count = len(gh_context.get("open_issues", []))
                     commits_count = len(gh_context.get("recent_commits", []))
@@ -196,6 +198,9 @@ class Agent:
         try:
             issues_resp  = call_mcp_tool("get_open_issues", {"repo": repo})
             commits_resp = call_mcp_tool("get_recent_commits", {"repo": repo, "n": 5})
+            if not issues_resp.get("success") and not commits_resp.get("success"):
+                # Don't report "0 open issues" when the API call itself failed
+                return {"error": issues_resp.get("error") or "GitHub request failed"}
             return {
                 "repo":           repo,
                 "open_issues":    issues_resp.get("output", []) if issues_resp.get("success") else [],

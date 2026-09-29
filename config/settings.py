@@ -9,8 +9,10 @@ class Settings(BaseSettings):
     db_path: Path = Path(__file__).parent.parent / "data" / "auraos.db"
     chroma_path: Path = Path(__file__).parent.parent / "data" / "chroma"
 
-    planner_model: str = "llama-3.3-70b-versatile"
-    classifier_model: str = "llama-3.1-8b-instant"   # fast + cheap for classification
+    # Groq retired the llama-3.x models. Avoid small reasoning models for the
+    # classifier: their hidden reasoning can eat max_tokens and return nothing.
+    planner_model: str = "openai/gpt-oss-120b"
+    classifier_model: str = "qwen/qwen3.8-27b"   # fast + cheap for classification
 
     port_filesystem: int = 8101
     port_macos: int = 8102

@@ -185,6 +185,8 @@ class Executor:
                 yield f"  ✓ {result.message} ({duration_ms}ms)\n"
                 if result.output and isinstance(result.output, dict):
                     yield from self._format_output(tool_name, result.output)
+                elif result.output and isinstance(result.output, list):
+                    yield from self._format_list_output(tool_name, result.output)
             else:
                 error = result.error if result else "Tool not found"
                 yield f"  ✗ Failed: {error}\n"
@@ -288,6 +290,13 @@ class Executor:
         events_result = self.wm.get_tool_result("get_today_events")
         goals_result  = self.wm.get_tool_result("list_goals")
 
+        # Workflows (e.g. end_of_day) call this without earlier fetch steps —
+        # load the inputs directly so the plan isn't generic.
+        if events_result is None:
+            events_result = self._execute_mcp("get_today_events", {}).output
+        if goals_result is None:
+            goals_result = self._execute_mcp("list_goals", {}).output
+
         events = []
         if isinstance(events_result, dict):
             events = events_result.get("events", [])
@@ -312,13 +321,14 @@ Active goals:
 
 Write a concise, prioritized daily plan for the user. Be specific and actionable.
 Format it clearly — lead with the top 3 priorities, note any time blocks from calendar,
-and flag anything that should be done first. Keep it under 150 words."""
+and flag anything that should be done first. Keep it under 150 words.
+Use plain text with simple "-" bullets: no tables or markdown (it is shown in a text overlay)."""
 
         try:
             response = client.chat.completions.create(
                 model=settings.planner_model,
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=300,
+                max_tokens=1024,  # headroom: reasoning models spend tokens before answering
                 temperature=0.3,
             )
             plan_text = response.choices[0].message.content.strip()
@@ -334,6 +344,23 @@ and flag anything that should be done first. Keep it under 150 words."""
                 tool_name="synthesize_daily_plan",
                 error=f"Synthesis failed: {e}",
             )
+
+    def _format_list_output(self, tool_name: str, items: list) -> Generator[str, None, None]:
+        """Surface list-returning tools (GitHub, goals) inline, capped at 10 rows."""
+        formatters = {
+            "list_repos":         lambda r: f"{r['full_name']}" + (f" — {r['description']}" if r.get("description") else ""),
+            "get_open_issues":    lambda i: f"#{i['number']} {i['title']}",
+            "get_open_prs":       lambda p: f"#{p['number']} {p['title']} ({p['author']})",
+            "get_recent_commits": lambda c: f"{c['sha']} {c['message']}",
+            "list_goals":         lambda g: f"[P{g.get('priority', '?')}] {g['title']}",
+        }
+        fmt = formatters.get(tool_name)
+        if not fmt:
+            return
+        for item in items[:10]:
+            yield f"     • {fmt(item)}\n"
+        if len(items) > 10:
+            yield f"     … and {len(items) - 10} more\n"
 
     def _format_output(self, tool_name: str, output: dict) -> Generator[str, None, None]:
         """Surface useful output fields inline."""
@@ -354,6 +381,18 @@ and flag anything that should be done first. Keep it under 150 words."""
                 yield "     Recent files:\n"
                 for f in files:
                     yield f"       • {f['name']}\n"
+
+        elif tool_name in ("open_url", "search_web"):
+            if output.get("title"):
+                yield f"     Page: {output['title']}\n"
+
+        elif tool_name == "get_page_text":
+            lines = [l.strip() for l in output.get("text", "").splitlines() if l.strip()]
+            preview = "\n".join(f"     {l}" for l in lines[:40])
+            if preview:
+                yield f"{preview}\n"
+            if len(lines) > 40 or output.get("truncated"):
+                yield "     …\n"
 
         elif tool_name == "open_vscode_workspace":
             opened = output.get("files_opened", [])

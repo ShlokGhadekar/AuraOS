@@ -32,7 +32,11 @@ def _bridge(command: str, arg: str = None) -> tuple[bool, Any]:
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode != 0:
-            return False, result.stdout.strip() or result.stderr.strip()
+            out = result.stdout.strip()
+            try:
+                return False, json.loads(out)["error"]  # bridge reports errors as {"error": ...}
+            except (json.JSONDecodeError, KeyError, TypeError):
+                return False, out or result.stderr.strip()
         data = json.loads(result.stdout.strip())
         if isinstance(data, dict) and "error" in data:
             return False, data["error"]

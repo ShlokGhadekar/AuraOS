@@ -40,7 +40,8 @@ GITHUB TOOLS:
 
 BROWSER TOOLS:
 - open_url(url, new_tab=false) → open a URL in a controlled browser
-- search_web(query, engine="google") → search google/leetcode/github/stackoverflow
+- search_web(query, engine="google") → engine is one of google|leetcode|github|stackoverflow;
+  when the user names one of those sites, use it as the engine (not google)
 - fill_form(fields={selector: value}, submit_selector=None) → fill and optionally submit a form
 - get_page_text() → read visible text from the current page
 - click_element(selector) → click an element
@@ -68,7 +69,10 @@ Rules:
    set requires_confirmation=true and require an explicit repo + the specific
    title/number/branch from the user's input. Never guess a repo if not specified —
    use the active project's github_repo from context.
-9. For 'browser_query' intent, the plan should be a single step: get_page_text with no params.
+9. For 'browser_query' intent: if the user asks about the page that is already open,
+   the plan is a single get_page_text step with no params. If they want to search
+   or visit a site, use search_web or open_url (then get_page_text only if they
+   asked what it says).
 Respond with ONLY a JSON array — no explanation, no markdown fences:
 [
   {{
@@ -98,7 +102,7 @@ Build the minimal plan to fulfill this request."""
                 {"role": "system", "content": SYSTEM},
                 {"role": "user",   "content": user_message},
             ],
-            max_tokens=1000,
+            max_tokens=2048,  # headroom: reasoning models spend tokens before answering
             temperature=0.1,
         )
         raw = response.choices[0].message.content.strip()

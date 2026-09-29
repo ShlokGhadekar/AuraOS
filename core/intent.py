@@ -21,7 +21,7 @@ INTENTS = {
     "memory_query":      "User is asking about past sessions or what they worked on",
     "general_task":      "Multi-step task that doesn't fit above categories",
     "github_write":  "User wants to create an issue, close an issue, or open a PR",
-    "browser_query": "User wants to read or interact with the current browser page",
+    "browser_query": "User wants to search the web, open a website, or read/interact with the current browser page",
     "unknown":           "Cannot determine intent",
 }
 
@@ -43,6 +43,7 @@ even when the input is also a workflow trigger. Examples:
   "create a PR for auraos" → intent: github_write, project_hint: "auraos"
   "what does the leetcode page say" → intent: browser_query, project_hint: null
   "read the current page" → intent: browser_query, project_hint: null
+  "search leetcode for two sum" → intent: browser_query, project_hint: null
 
 For project_kickoff intent, also extract project_type if mentioned (python, node, or react).
 Default to "python" if not specified.
