@@ -9,3 +9,4 @@ electron-overlay/node_modules/
 .DS_Store
 .pytest_cache/
 config/.projects_yaml.hash
+brag-output/

@@ -2,6 +2,10 @@
 
 > An AI-powered command layer for macOS — a personal agent with persistent memory, planning, and real computer control, built on MCP (Model Context Protocol).
 
+[![AuraOS launch video — click to play](docs/auraos-launch.jpg)](docs/auraos-launch.mp4)
+
+<sub>▶ 20-second demo — click the image to play.</sub>
+
 AuraOS sits between you and your Mac. Press a hotkey, type what you want in plain English, and it plans a sequence of real actions — recalling full context from your last work session, checking your calendar and GitHub issues, creating new repos, automating focus routines, controlling a real browser — and executes them with a streaming, transparent UI that shows its plan before it runs.
 
 It is not a chatbot wrapper. It's an agent with persistent cross-session memory, a modular multi-server tool architecture, and genuine write access to real systems: filesystem, git, GitHub, macOS Calendar, and a browser.
